@@ -5,6 +5,7 @@ import time
 from PIL import Image, ImageDraw, ImageFont
 from menu.setup_menu import display_setup_page
 from menu.stream_menu import display_stream_page
+from menu.gps_menu import display_gps_page
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -24,7 +25,7 @@ lcd.ShowImage(im_r)
 time.sleep(2)
 
 # Menu setup
-menu_items = ['SETUP', 'ACTIVATE', 'STATUS', 'SHUTDOWN']
+menu_items = ['SETUP', 'ACTIVATE', 'GPS', 'STATUS', 'SHUTDOWN']
 selection_index = -1
 last_down_state = -1
 last_up_state = -1
@@ -33,7 +34,8 @@ label_positions = [
     (5, 5, 235, 35),
     (5, 40, 235, 70),
     (5, 75, 235, 105),
-    (5, 110, 235, 140)
+    (5, 110, 235, 140),
+    (5, 145, 235, 175)
 ]
 
 def update_menu_display(index):
@@ -79,6 +81,10 @@ while True:
         
         if menu_items[selection_index] == "ACTIVATE":
             display_stream_page(lcd)
+            update_menu_display(selection_index)  # Return to menu
+        
+        if menu_items[selection_index] == "GPS":
+            display_gps_page(lcd)
             update_menu_display(selection_index)  # Return to menu
 
     last_down_state = down_state

@@ -49,7 +49,7 @@ KEY3_PIN       = 16
 
 # GPS configuration
 GPS_EN_PIN     = 17  # GPIO pin for GPS module enable, set to None to disable
-GPS_PORT       = '/dev/serial0'
+GPS_PORT       = '/dev/ttyAMA0'
 GPS_BAUDRATE   = 9600
 GPS_TIMEOUT    = 1
 
