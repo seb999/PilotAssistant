@@ -16,6 +16,9 @@ opencv-python>=4.5.0
 # Serial communication for GPS
 pyserial>=3.4
 
+# HTTP requests for external APIs
+requests>=2.25.0
+
 # I2C communication for sensors (ADXL345)
 smbus2>=0.4.0
 

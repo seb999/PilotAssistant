@@ -36,7 +36,7 @@ def read_axes():
 try:
     while True:
         x, y, z = read_axes()
-        print(f"X: {x:.3f} g, Y: {y:.3f} g, Z: {z:.3f} g")
+        print(f"X: {x:.2f} g, Y: {y:.2f} g, Z: {z:.2f} g")
         time.sleep(0.1)
 
 except KeyboardInterrupt:
