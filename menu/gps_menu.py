@@ -56,16 +56,48 @@ def parse_gga(nmea_line):
 def display_gps_page(lcd):
     print("Displaying GPS page...")
     
-    font_large = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 20)
-    font_small = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMono.ttf', 16)
+    font_title = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 28)
+    font_large = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 24)
+    font_medium = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 20)
+    font_small = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMono.ttf', 18)
     
-    # Initialize GPS enable pin
+    # Display initial GPS page immediately
+    def display_initial_page(status_text="Initializing GPS..."):
+        background = Image.new("RGB", (lcd.width, lcd.height), "BLACK")
+        draw = ImageDraw.Draw(background)
+        
+        # Title with cyan background spanning full width
+        title_text = "GPS POSITION"
+        title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
+        title_height = title_bbox[3] - title_bbox[1]
+        
+        # Draw cyan background for title (full width)
+        draw.rectangle((0, 5, lcd.width, title_height + 15), fill="CYAN")
+        draw.text((10, 8), title_text, fill="BLACK", font=font_title)
+        
+        # Status message
+        draw.text((10, 70), status_text, fill="YELLOW", font=font_medium)
+        
+        # Instructions
+        draw.text((10, 190), "Press CENTER", fill="CYAN", font=font_medium)
+        draw.text((10, 215), "to exit", fill="CYAN", font=font_medium)
+        
+        # Display image
+        im_r = background.rotate(270)
+        lcd.ShowImage(im_r)
+    
+    # Show initial page immediately
+    display_initial_page()
+    
+    # Initialize GPS enable pin in background
     gps_en = None
     if GPS_EN_PIN is not None:
         try:
             gps_en = DigitalOutputDevice(GPS_EN_PIN)
             gps_en.on()
+            display_initial_page("GPS powering up...")
             time.sleep(2)  # Wait for GPS to boot
+            display_initial_page("Opening GPS port...")
         except Exception as e:
             print(f"Error setting up GPS enable pin: {e}")
             gps_en = None
@@ -74,16 +106,24 @@ def display_gps_page(lcd):
     try:
         ser = serial.Serial(GPS_PORT, GPS_BAUDRATE, timeout=GPS_TIMEOUT)
         print(f"GPS serial port opened: {GPS_PORT}")
+        display_initial_page("Searching for satellites...")
     except serial.SerialException as e:
         print(f"Error opening GPS port: {e}")
         # Display error and return
         background = Image.new("RGB", (lcd.width, lcd.height), "BLACK")
         draw = ImageDraw.Draw(background)
+        # Title with cyan background spanning full width
+        title_text = "GPS POSITION"
+        title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
+        title_height = title_bbox[3] - title_bbox[1]
+        draw.rectangle((0, 5, lcd.width, title_height + 15), fill="CYAN")
+        draw.text((10, 8), title_text, fill="BLACK", font=font_title)
+        
         draw.text((10, 50), "GPS ERROR", fill="RED", font=font_large)
-        draw.text((10, 80), "Port not", fill="WHITE", font=font_small)
-        draw.text((10, 100), "available", fill="WHITE", font=font_small)
-        draw.text((10, 180), "Press CENTER", fill="CYAN", font=font_small)
-        draw.text((10, 200), "to exit", fill="CYAN", font=font_small)
+        draw.text((10, 80), "Port not", fill="WHITE", font=font_medium)
+        draw.text((10, 100), "available", fill="WHITE", font=font_medium)
+        draw.text((10, 180), "Press CENTER", fill="CYAN", font=font_medium)
+        draw.text((10, 200), "to exit", fill="CYAN", font=font_medium)
         im_r = background.rotate(270)
         lcd.ShowImage(im_r)
         
@@ -99,64 +139,83 @@ def display_gps_page(lcd):
     last_gps_data = None
     data_timeout = time.time()
     
+    display_update_counter = 0
+    # Initialize with current button state to avoid immediate exit
+    last_state = lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN)
+    
     try:
         while True:
-            # Read GPS data
+            # Check for exit button (responsive input)
+            current_state = lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN)
+            if current_state == 0 and last_state == 1:
+                time.sleep(0.05)  # Debounce
+                if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 0:
+                    break
+            last_state = current_state
+            
+            # Read GPS data only if available (non-blocking)
             try:
-                line = ser.readline().decode('ascii', errors='replace').strip()
-                if line:
-                    gps_data = parse_gga(line)
-                    if gps_data:
-                        last_gps_data = gps_data
-                        data_timeout = time.time()
+                if ser.in_waiting > 0:
+                    line = ser.readline().decode('ascii', errors='replace').strip()
+                    if line:
+                        gps_data = parse_gga(line)
+                        if gps_data:
+                            last_gps_data = gps_data
+                            data_timeout = time.time()
             except Exception as e:
                 print(f"GPS read error: {e}")
             
-            # Create display
-            background = Image.new("RGB", (lcd.width, lcd.height), "BLACK")
-            draw = ImageDraw.Draw(background)
-            
-            # Title
-            draw.text((10, 5), "GPS POSITION", fill="CYAN", font=font_large)
-            
-            # Check if we have recent data (within 5 seconds)
-            if last_gps_data and (time.time() - data_timeout < 5):
-                # Display coordinates
-                lat = last_gps_data['latitude']
-                lon = last_gps_data['longitude']
-                sats = last_gps_data['satellites']
+            # Update display every 5 cycles to reduce flicker while maintaining responsiveness
+            display_update_counter += 1
+            if display_update_counter >= 5:
+                display_update_counter = 0
                 
-                if lat is not None and lon is not None:
-                    draw.text((10, 40), "LATITUDE:", fill="WHITE", font=font_small)
-                    draw.text((10, 60), f"{lat:.6f}", fill="GREEN", font=font_small)
+                # Create display
+                background = Image.new("RGB", (lcd.width, lcd.height), "BLACK")
+                draw = ImageDraw.Draw(background)
+                
+                # Title with cyan background spanning full width
+                title_text = "GPS POSITION"
+                title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
+                title_height = title_bbox[3] - title_bbox[1]
+                
+                # Draw cyan background for title (full width)
+                draw.rectangle((0, 5, lcd.width, title_height + 15), fill="CYAN")
+                draw.text((10, 8), title_text, fill="BLACK", font=font_title)
+                
+                # Check if we have recent data (within 5 seconds)
+                if last_gps_data and (time.time() - data_timeout < 5):
+                    # Display coordinates
+                    lat = last_gps_data['latitude']
+                    lon = last_gps_data['longitude']
+                    sats = last_gps_data['satellites']
                     
-                    draw.text((10, 90), "LONGITUDE:", fill="WHITE", font=font_small)
-                    draw.text((10, 110), f"{lon:.6f}", fill="GREEN", font=font_small)
-                    
-                    draw.text((10, 140), f"SATS: {sats}", fill="YELLOW", font=font_small)
+                    if lat is not None and lon is not None:
+                        draw.text((10, 50), "LATITUDE:", fill="WHITE", font=font_medium)
+                        draw.text((10, 75), f"{lat:.6f}", fill="GREEN", font=font_large)
+                        
+                        draw.text((10, 105), "LONGITUDE:", fill="WHITE", font=font_medium)
+                        draw.text((10, 130), f"{lon:.6f}", fill="GREEN", font=font_large)
+                        
+                        draw.text((10, 160), f"SATS: {sats}", fill="YELLOW", font=font_medium)
+                    else:
+                        draw.text((10, 70), "NO VALID", fill="RED", font=font_medium)
+                        draw.text((10, 95), "COORDINATES", fill="RED", font=font_medium)
                 else:
-                    draw.text((10, 60), "NO VALID", fill="RED", font=font_small)
-                    draw.text((10, 80), "COORDINATES", fill="RED", font=font_small)
-            else:
-                # No GPS data
-                draw.text((10, 60), "NO GPS DATA", fill="RED", font=font_large)
-                draw.text((10, 90), "Searching...", fill="YELLOW", font=font_small)
+                    # No GPS data
+                    draw.text((10, 70), "NO GPS DATA", fill="RED", font=font_large)
+                    draw.text((10, 100), "Searching...", fill="YELLOW", font=font_medium)
+                
+                # Instructions
+                draw.text((10, 190), "Press CENTER", fill="CYAN", font=font_medium)
+                draw.text((10, 215), "to exit", fill="CYAN", font=font_medium)
+                
+                # Display image
+                im_r = background.rotate(270)
+                lcd.ShowImage(im_r)
             
-            # Instructions
-            draw.text((10, 180), "Press CENTER", fill="CYAN", font=font_small)
-            draw.text((10, 200), "to exit", fill="CYAN", font=font_small)
-            
-            # Display image
-            im_r = background.rotate(270)
-            lcd.ShowImage(im_r)
-            
-            # Check for exit button
-            if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 0:
-                time.sleep(0.1)
-                if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 1:
-                    break
-            
-            time.sleep(0.1)
+            # Short sleep for responsive input checking
+            time.sleep(0.02)
             
     finally:
         ser.close()

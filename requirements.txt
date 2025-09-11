@@ -1,0 +1,30 @@
+# Core Python imaging and graphics libraries
+pillow>=8.0.0
+
+# Raspberry Pi GPIO control
+gpiozero>=1.6.0
+
+# SPI communication for displays
+spidev>=3.0
+
+# Camera support for Raspberry Pi
+picamera2>=0.3.0
+
+# Computer vision and image processing
+opencv-python>=4.5.0
+
+# Serial communication for GPS
+pyserial>=3.4
+
+# I2C communication for sensors (ADXL345)
+smbus2>=0.4.0
+
+# Scientific computing for display calculations
+# Note: Use system numpy version (numpy==1.24.2) to avoid binary incompatibility with simplejpeg
+# numpy>=1.19.0
+
+# System and logging (usually included with Python but listed for completeness)
+# logging - built-in
+# time - built-in
+# sys - built-in
+# os - built-in
