@@ -9,7 +9,11 @@ from PIL import Image, ImageDraw, ImageFont
 from gpiozero import DigitalOutputDevice
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'library'))
-from library.config import GPS_EN_PIN, GPS_PORT, GPS_BAUDRATE, GPS_TIMEOUT
+from library.config import GPS_EN_PIN, GPS_PORT, GPS_BAUDRATE, GPS_TIMEOUT, DEBUG_MODE, DEBUG_LATITUDE, DEBUG_LONGITUDE
+
+# Traffic menu configuration
+AIRCRAFT_RANGE_KM = 25      # Radius in km to search for aircraft (good for Cessna at 100kts)
+UPDATE_INTERVAL_SEC = 10    # Update aircraft data every N seconds
 
 def haversine(lat1, lon1, lat2, lon2):
     """Calculate distance between two lat/lon points using Haversine formula"""
@@ -32,18 +36,14 @@ def check_wifi_status():
     except:
         return False
 
-def get_user_location_from_ip():
-    """Get user location using IP geolocation as fallback"""
-    try:
-        response = requests.get("https://ipinfo.io/json", timeout=5)
-        data = response.json()
-        if 'loc' in data:
-            lat_str, lon_str = data['loc'].split(',')
-            return float(lat_str), float(lon_str)
-    except Exception as e:
-        print(f"IP geolocation error: {e}")
-        # Return default coordinates (somewhere in Europe) if all else fails
-        return 52.5200, 13.4050  # Berlin coordinates as fallback
+def get_debug_location():
+    """Get Stockholm coordinates for debug mode"""
+    if DEBUG_MODE:
+        print("Using debug coordinates (Stockholm)")
+        return DEBUG_LATITUDE, DEBUG_LONGITUDE
+    else:
+        print("Debug mode disabled - GPS-only mode")
+        return None
 
 def parse_gga(nmea_line):
     """Parse GPGGA NMEA sentence for coordinates"""
@@ -126,7 +126,7 @@ def get_gps_location():
     
     return None
 
-def get_aircraft(lat, lon, radius_km=40):
+def get_aircraft(lat, lon, radius_km=AIRCRAFT_RANGE_KM):
     """Get aircraft data within bounding box using OpenSky Network API"""
     try:
         delta_deg = radius_km / 111  # Rough approximation
@@ -186,7 +186,7 @@ def display_traffic_page(lcd):
     user_lat, user_lon, pos_source = None, None, "LOADING"
     aircraft_list = []
     last_update = 0
-    update_interval = 10  # Update every 30 seconds
+    update_interval = UPDATE_INTERVAL_SEC
     position_fetched = False
     
     # GPS status variables
@@ -337,23 +337,29 @@ def display_traffic_page(lcd):
             
             # Get user position if not fetched yet
             if not position_fetched:
-                draw_display("Getting GPS...")
-                gps_pos = get_gps_location()
-                if gps_pos:
-                    user_lat, user_lon, pos_source = gps_pos[0], gps_pos[1], "GPS"
-                    gps_status = "GREEN"  # GPS signal available
-                    gps_data = {'latitude': gps_pos[0], 'longitude': gps_pos[1], 'satellites': '?'}
+                if DEBUG_MODE:
+                    draw_display("Using debug location...")
+                    debug_pos = get_debug_location()
+                    user_lat, user_lon, pos_source = debug_pos[0], debug_pos[1], "DEBUG"
+                    gps_status = "GREEN"  # Show green for debug mode
+                    gps_data = {'latitude': debug_pos[0], 'longitude': debug_pos[1], 'satellites': '8'}
                 else:
-                    draw_display("Using IP location...")
-                    ip_pos = get_user_location_from_ip()
-                    user_lat, user_lon, pos_source = ip_pos[0], ip_pos[1], "IP"
-                    gps_status = "RED"  # No GPS signal (using IP location)
-                    gps_data = None
+                    draw_display("Getting GPS...")
+                    gps_pos = get_gps_location()
+                    if gps_pos:
+                        user_lat, user_lon, pos_source = gps_pos[0], gps_pos[1], "GPS"
+                        gps_status = "GREEN"  # GPS signal available
+                        gps_data = {'latitude': gps_pos[0], 'longitude': gps_pos[1], 'satellites': '?'}
+                    else:
+                        draw_display("No GPS signal...")
+                        # No fallback - just stay in loading state
+                        time.sleep(1)
+                        continue  # Try GPS again
                 position_fetched = True
                 last_update = time.time() - update_interval  # Force immediate aircraft fetch
             
-            # Continuously check GPS status
-            if pos_source == "GPS":
+            # Continuously check GPS status (only if not in debug mode)
+            if pos_source == "GPS" and not DEBUG_MODE:
                 # Try to get fresh GPS data
                 fresh_gps = get_gps_location()
                 if fresh_gps:
@@ -368,6 +374,7 @@ def display_traffic_page(lcd):
             if position_fetched and current_time - last_update > update_interval:
                 draw_display("Getting aircraft...")
                 aircraft_list = get_aircraft(user_lat, user_lon)
+                # Always update last_update to prevent infinite requests, even if API failed
                 last_update = current_time
                 print(f"Found {len(aircraft_list)} aircraft")
             

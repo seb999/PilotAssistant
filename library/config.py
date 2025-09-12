@@ -53,6 +53,11 @@ GPS_PORT       = '/dev/ttyAMA0'
 GPS_BAUDRATE   = 9600
 GPS_TIMEOUT    = 1
 
+# Debug mode configuration
+DEBUG_MODE     = True  # Set to True to use Stockholm coordinates instead of real GPS
+DEBUG_LATITUDE = 59.3293  # Stockholm coordinates
+DEBUG_LONGITUDE = 18.0686
+
 class RaspberryPi:
     def __init__(self,spi=spidev.SpiDev(0,0),spi_freq=40000000,rst = 27,dc = 25,bl = 24,bl_freq=1000,i2c=None,i2c_freq=100000):
         self.np=np

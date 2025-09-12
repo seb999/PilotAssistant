@@ -179,34 +179,39 @@ class PilotAssistantSystem:
         """Handle UP/DOWN controls for aircraft selection in traffic mode"""
         if self.current_display != 'traffic':
             return
-            
-        # Update sorted aircraft list
-        aircraft_list = self.traffic_service.get_data()
-        if aircraft_list:
-            self.sorted_aircraft_list = sorted(aircraft_list, key=lambda ac: ac['distance_km'])
         
         # Check for UP button - next aircraft
         up_state = self.lcd.digital_read(self.lcd.GPIO_KEY_UP_PIN)
         if up_state == 0 and self.last_up_state == 1:
             time.sleep(0.05)  # Debounce
-            if self.lcd.digital_read(self.lcd.GPIO_KEY_UP_PIN) == 0 and self.sorted_aircraft_list:
-                # Go to next aircraft (forward in list)
-                self.current_aircraft_index = (self.current_aircraft_index + 1) % len(self.sorted_aircraft_list)
-                self.selected_aircraft = self.sorted_aircraft_list[self.current_aircraft_index]
-                self.show_aircraft_info = True
-                self.aircraft_info_timeout = time.time() + 15  # Show for 15 seconds
+            if self.lcd.digital_read(self.lcd.GPIO_KEY_UP_PIN) == 0:
+                # Update aircraft list only when button is pressed
+                aircraft_list = self.traffic_service.get_data()
+                if aircraft_list:
+                    self.sorted_aircraft_list = sorted(aircraft_list, key=lambda ac: ac['distance_km'])
+                    # Go to next aircraft (forward in list)
+                    self.current_aircraft_index = (self.current_aircraft_index + 1) % len(self.sorted_aircraft_list)
+                    self.selected_aircraft = self.sorted_aircraft_list[self.current_aircraft_index]
+                    self.show_aircraft_info = True
+                    self.aircraft_info_timeout = time.time() + 15  # Show for 15 seconds
+                    print(f"Selected aircraft: {self.selected_aircraft['callsign']} at {self.selected_aircraft['distance_km']:.1f}km")
         self.last_up_state = up_state
         
         # Check for DOWN button - previous aircraft
         down_state = self.lcd.digital_read(self.lcd.GPIO_KEY_DOWN_PIN)
         if down_state == 0 and self.last_down_state == 1:
             time.sleep(0.05)  # Debounce
-            if self.lcd.digital_read(self.lcd.GPIO_KEY_DOWN_PIN) == 0 and self.sorted_aircraft_list:
-                # Go to previous aircraft (backward in list)
-                self.current_aircraft_index = (self.current_aircraft_index - 1) % len(self.sorted_aircraft_list)
-                self.selected_aircraft = self.sorted_aircraft_list[self.current_aircraft_index]
-                self.show_aircraft_info = True
-                self.aircraft_info_timeout = time.time() + 15  # Show for 15 seconds
+            if self.lcd.digital_read(self.lcd.GPIO_KEY_DOWN_PIN) == 0:
+                # Update aircraft list only when button is pressed
+                aircraft_list = self.traffic_service.get_data()
+                if aircraft_list:
+                    self.sorted_aircraft_list = sorted(aircraft_list, key=lambda ac: ac['distance_km'])
+                    # Go to previous aircraft (backward in list)
+                    self.current_aircraft_index = (self.current_aircraft_index - 1) % len(self.sorted_aircraft_list)
+                    self.selected_aircraft = self.sorted_aircraft_list[self.current_aircraft_index]
+                    self.show_aircraft_info = True
+                    self.aircraft_info_timeout = time.time() + 15  # Show for 15 seconds
+                    print(f"Selected aircraft: {self.selected_aircraft['callsign']} at {self.selected_aircraft['distance_km']:.1f}km")
         self.last_down_state = down_state
         
         # Hide aircraft info after timeout
@@ -220,13 +225,12 @@ class PilotAssistantSystem:
         aircraft_list = self.traffic_service.get_data()
         wifi_status = self.wifi_service.get_status()
         
-        # Update traffic data if GPS available
+        # Get GPS coordinates for display (background service handles API calls)
         user_lat = user_lon = None
         if gps_data['gps_data'] and gps_data['gps_data']['latitude'] and gps_data['gps_data']['longitude']:
             user_lat = gps_data['gps_data']['latitude']
             user_lon = gps_data['gps_data']['longitude']
-            self.traffic_service.update_aircraft(user_lat, user_lon)
-            aircraft_list = self.traffic_service.get_data()  # Get updated list
+            # Note: Background traffic service handles periodic API updates
         
         background = Image.new("RGB", (self.lcd.width, self.lcd.height), "BLACK")
         draw = ImageDraw.Draw(background)
@@ -267,7 +271,7 @@ class PilotAssistantSystem:
             if user_lat and user_lon:
                 display_lat, display_lon = user_lat, user_lon
             else:
-                # Use IP location for display purposes
+                # Use fallback location for display purposes (debug coordinates if enabled)
                 display_lat, display_lon = self.traffic_service.get_fallback_location()
             
             if display_lat and display_lon:

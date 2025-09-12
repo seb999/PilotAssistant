@@ -7,7 +7,7 @@ from gpiozero import DigitalOutputDevice
 from library import ST7789
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'library'))
-from library.config import GPS_EN_PIN, GPS_PORT, GPS_BAUDRATE, GPS_TIMEOUT
+from library.config import GPS_EN_PIN, GPS_PORT, GPS_BAUDRATE, GPS_TIMEOUT, DEBUG_MODE, DEBUG_LATITUDE, DEBUG_LONGITUDE
 
 def parse_gga(nmea_line):
     """Parse GPGGA NMEA sentence for coordinates"""
@@ -55,6 +55,8 @@ def parse_gga(nmea_line):
 
 def display_gps_page(lcd):
     print("Displaying GPS page...")
+    if DEBUG_MODE:
+        print("DEBUG MODE: Using Stockholm coordinates")
     
     font_title = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 28)
     font_large = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 24)
@@ -68,6 +70,8 @@ def display_gps_page(lcd):
         
         # Title with cyan background spanning full width
         title_text = "GPS POSITION"
+        if DEBUG_MODE:
+            title_text = "GPS DEBUG"
         title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
         title_height = title_bbox[3] - title_bbox[1]
         
@@ -76,6 +80,8 @@ def display_gps_page(lcd):
         draw.text((10, 8), title_text, fill="BLACK", font=font_title)
         
         # Status message
+        if DEBUG_MODE:
+            status_text = "Debug Mode Active"
         draw.text((10, 70), status_text, fill="YELLOW", font=font_medium)
         
         # Instructions
@@ -89,52 +95,65 @@ def display_gps_page(lcd):
     # Show initial page immediately
     display_initial_page()
     
-    # Initialize GPS enable pin in background
-    gps_en = None
-    if GPS_EN_PIN is not None:
+    # Handle debug mode or real GPS
+    if DEBUG_MODE:
+        # In debug mode, skip GPS initialization
+        gps_en = None
+        ser = None
+        display_initial_page("Debug coordinates ready")
+        # Create debug GPS data
+        debug_gps_data = {
+            'latitude': DEBUG_LATITUDE,
+            'longitude': DEBUG_LONGITUDE,
+            'satellites': '8'  # Simulate 8 satellites for debug
+        }
+    else:
+        # Initialize GPS enable pin in background
+        gps_en = None
+        if GPS_EN_PIN is not None:
+            try:
+                gps_en = DigitalOutputDevice(GPS_EN_PIN)
+                gps_en.on()
+                display_initial_page("GPS powering up...")
+                time.sleep(2)  # Wait for GPS to boot
+                display_initial_page("Opening GPS port...")
+            except Exception as e:
+                print(f"Error setting up GPS enable pin: {e}")
+                gps_en = None
+        
+        # Open GPS serial port
         try:
-            gps_en = DigitalOutputDevice(GPS_EN_PIN)
-            gps_en.on()
-            display_initial_page("GPS powering up...")
-            time.sleep(2)  # Wait for GPS to boot
-            display_initial_page("Opening GPS port...")
-        except Exception as e:
-            print(f"Error setting up GPS enable pin: {e}")
-            gps_en = None
-    
-    # Open GPS serial port
-    try:
-        ser = serial.Serial(GPS_PORT, GPS_BAUDRATE, timeout=GPS_TIMEOUT)
-        print(f"GPS serial port opened: {GPS_PORT}")
-        display_initial_page("Searching for satellites...")
-    except serial.SerialException as e:
-        print(f"Error opening GPS port: {e}")
-        # Display error and return
-        background = Image.new("RGB", (lcd.width, lcd.height), "BLACK")
-        draw = ImageDraw.Draw(background)
-        # Title with cyan background spanning full width
-        title_text = "GPS POSITION"
-        title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
-        title_height = title_bbox[3] - title_bbox[1]
-        draw.rectangle((0, 5, lcd.width, title_height + 15), fill="CYAN")
-        draw.text((10, 8), title_text, fill="BLACK", font=font_title)
-        
-        draw.text((10, 50), "GPS ERROR", fill="RED", font=font_large)
-        draw.text((10, 80), "Port not", fill="WHITE", font=font_medium)
-        draw.text((10, 100), "available", fill="WHITE", font=font_medium)
-        draw.text((10, 180), "Press CENTER", fill="CYAN", font=font_medium)
-        draw.text((10, 200), "to exit", fill="CYAN", font=font_medium)
-        im_r = background.rotate(270)
-        lcd.ShowImage(im_r)
-        
-        # Wait for button press to exit
-        while True:
-            if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 0:
+            ser = serial.Serial(GPS_PORT, GPS_BAUDRATE, timeout=GPS_TIMEOUT)
+            print(f"GPS serial port opened: {GPS_PORT}")
+            display_initial_page("Searching for satellites...")
+        except serial.SerialException as e:
+            print(f"Error opening GPS port: {e}")
+            # Display error and return
+            background = Image.new("RGB", (lcd.width, lcd.height), "BLACK")
+            draw = ImageDraw.Draw(background)
+            # Title with cyan background spanning full width
+            title_text = "GPS POSITION"
+            title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
+            title_height = title_bbox[3] - title_bbox[1]
+            draw.rectangle((0, 5, lcd.width, title_height + 15), fill="CYAN")
+            draw.text((10, 8), title_text, fill="BLACK", font=font_title)
+            
+            draw.text((10, 50), "GPS ERROR", fill="RED", font=font_large)
+            draw.text((10, 80), "Port not", fill="WHITE", font=font_medium)
+            draw.text((10, 100), "available", fill="WHITE", font=font_medium)
+            draw.text((10, 180), "Press CENTER", fill="CYAN", font=font_medium)
+            draw.text((10, 200), "to exit", fill="CYAN", font=font_medium)
+            im_r = background.rotate(270)
+            lcd.ShowImage(im_r)
+            
+            # Wait for button press to exit
+            while True:
+                if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 0:
+                    time.sleep(0.1)
+                    if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 1:
+                        break
                 time.sleep(0.1)
-                if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 1:
-                    break
-            time.sleep(0.1)
-        return
+            return
     
     last_gps_data = None
     data_timeout = time.time()
@@ -153,17 +172,23 @@ def display_gps_page(lcd):
                     break
             last_state = current_state
             
-            # Read GPS data only if available (non-blocking)
-            try:
-                if ser.in_waiting > 0:
-                    line = ser.readline().decode('ascii', errors='replace').strip()
-                    if line:
-                        gps_data = parse_gga(line)
-                        if gps_data:
-                            last_gps_data = gps_data
-                            data_timeout = time.time()
-            except Exception as e:
-                print(f"GPS read error: {e}")
+            # Handle GPS data based on mode
+            if DEBUG_MODE:
+                # Use debug GPS data
+                last_gps_data = debug_gps_data
+                data_timeout = time.time()
+            else:
+                # Read GPS data only if available (non-blocking)
+                try:
+                    if ser.in_waiting > 0:
+                        line = ser.readline().decode('ascii', errors='replace').strip()
+                        if line:
+                            gps_data = parse_gga(line)
+                            if gps_data:
+                                last_gps_data = gps_data
+                                data_timeout = time.time()
+                except Exception as e:
+                    print(f"GPS read error: {e}")
             
             # Update display every 5 cycles to reduce flicker while maintaining responsiveness
             display_update_counter += 1
@@ -175,7 +200,7 @@ def display_gps_page(lcd):
                 draw = ImageDraw.Draw(background)
                 
                 # Title with cyan background spanning full width
-                title_text = "GPS POSITION"
+                title_text = "GPS DEBUG" if DEBUG_MODE else "GPS POSITION"
                 title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
                 title_height = title_bbox[3] - title_bbox[1]
                 
@@ -218,7 +243,8 @@ def display_gps_page(lcd):
             time.sleep(0.02)
             
     finally:
-        ser.close()
+        if ser is not None:
+            ser.close()
         if gps_en is not None:
             gps_en.off()
             gps_en.close()

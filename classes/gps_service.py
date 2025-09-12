@@ -7,7 +7,7 @@ from gpiozero import DigitalOutputDevice
 
 # Import existing libraries
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'library'))
-from library.config import GPS_EN_PIN, GPS_PORT, GPS_BAUDRATE, GPS_TIMEOUT
+from library.config import GPS_EN_PIN, GPS_PORT, GPS_BAUDRATE, GPS_TIMEOUT, DEBUG_MODE, DEBUG_LATITUDE, DEBUG_LONGITUDE
 
 
 class GPSService:
@@ -68,6 +68,18 @@ class GPSService:
         """Start the GPS service"""
         self.running = True
         
+        if DEBUG_MODE:
+            print("GPS service: Debug mode enabled, using Stockholm coordinates")
+            # Set debug GPS data immediately
+            self.gps_data = {
+                'latitude': DEBUG_LATITUDE,
+                'longitude': DEBUG_LONGITUDE,
+                'satellites': '8'  # Simulate 8 satellites
+            }
+            self.gps_status = "GREEN"
+            print(f"GPS service: Using debug coordinates {DEBUG_LATITUDE}, {DEBUG_LONGITUDE}")
+            return
+        
         # Initialize GPS enable pin
         if GPS_EN_PIN is not None:
             try:
@@ -92,6 +104,10 @@ class GPSService:
     
     def _gps_worker(self):
         """Background thread that reads GPS data"""
+        # Skip GPS worker in debug mode
+        if DEBUG_MODE:
+            return
+            
         while self.running:
             try:
                 if self.serial_port and self.serial_port.in_waiting > 0:
