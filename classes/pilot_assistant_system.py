@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 # Import existing libraries
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'library'))
 from library import ST7789
+from library.config import DEBUG_MODE
 
 # Import service classes
 from .gps_service import GPSService
@@ -35,6 +36,15 @@ class PilotAssistantSystem:
         self.traffic_service = TrafficService(self.gps_service)
         self.wifi_service = WiFiService()
         self.attitude_service = AttitudeService()
+        
+        # Attitude warning thresholds (degrees)
+        self.max_bank_angle = 45.0  # Maximum safe bank angle
+        self.max_pitch_angle = 20.0  # Maximum safe pitch angle (up or down)
+        
+        # Blinking state for warnings
+        self.blink_state = False
+        self.last_blink_time = 0
+        self.blink_interval = 0.5  # Blink every 500ms
         
         # Display state
         self.current_display = 'main'  # main, attitude, traffic, camera
@@ -116,9 +126,18 @@ class PilotAssistantSystem:
         self.last_key3_state = key3_state
         self.last_center_state = center_state
     
+    def update_blink_state(self):
+        """Update blinking state for warnings"""
+        current_time = time.time()
+        if current_time - self.last_blink_time >= self.blink_interval:
+            self.blink_state = not self.blink_state
+            self.last_blink_time = current_time
+    
     def display_main(self):
         """Display main status screen"""
-        background = Image.new("RGB", (self.lcd.width, self.lcd.height), "BLACK")
+        # Use light red background in debug mode, black otherwise
+        bg_color = "#400000" if DEBUG_MODE else "BLACK"  # Dark red background in debug mode
+        background = Image.new("RGB", (self.lcd.width, self.lcd.height), bg_color)
         draw = ImageDraw.Draw(background)
         
         # Get data from services
@@ -127,43 +146,90 @@ class PilotAssistantSystem:
         wifi_status = self.wifi_service.get_status()
         attitude_data = self.attitude_service.get_attitude()
         
-        # Title
-        draw.text((10, 10), "PILOT ASSISTANT", fill="CYAN", font=self.font_large)
+        # Title with ribbon background
+        title_text = "PILOT ASSISTANT"
+        title_bbox = draw.textbbox((0, 0), title_text, font=self.font_large)
+        title_width = title_bbox[2] - title_bbox[0]
+        title_height = title_bbox[3] - title_bbox[1]
+        
+        # Draw ribbon background (full width)
+        draw.rectangle((0, 5, self.lcd.width, title_height + 15), fill="CYAN")
+        
+        # Center the title text on the ribbon
+        title_x = (self.lcd.width - title_width) // 2
+        draw.text((title_x, 8), title_text, fill="BLACK", font=self.font_large)
         
         # Status information
         y_pos = 50
         
         # GPS Status
         gps_color = "GREEN" if gps_data['gps_status'] == "GREEN" else "RED"
-        draw.text((10, y_pos), "GPS:", fill="WHITE", font=self.font_medium)
-        draw.text((80, y_pos), gps_data['gps_status'], fill=gps_color, font=self.font_medium)
-        y_pos += 30
+        gps_text = "OK" if gps_data['gps_status'] == "GREEN" else "N/A"
+        draw.text((10, y_pos), "GPS:", fill="WHITE", font=self.font_large)
+        draw.text((80, y_pos), gps_text, fill=gps_color, font=self.font_large)
+        y_pos += 35
         
         # WiFi Status
         wifi_color = "GREEN" if wifi_status else "RED"
         wifi_text = "OK" if wifi_status else "FAIL"
-        draw.text((10, y_pos), "WIFI:", fill="WHITE", font=self.font_medium)
-        draw.text((80, y_pos), wifi_text, fill=wifi_color, font=self.font_medium)
-        y_pos += 30
+        draw.text((10, y_pos), "WIFI:", fill="WHITE", font=self.font_large)
+        draw.text((90, y_pos), wifi_text, fill=wifi_color, font=self.font_large)
+        y_pos += 35
         
         # Aircraft count
-        draw.text((10, y_pos), "AIRCRAFT:", fill="WHITE", font=self.font_medium)
-        draw.text((120, y_pos), str(aircraft_count), fill="YELLOW", font=self.font_medium)
+        draw.text((10, y_pos), "AIRCRAFT:", fill="WHITE", font=self.font_large)
+        draw.text((140, y_pos), str(aircraft_count), fill="YELLOW", font=self.font_large)
+        y_pos += 35
+        
+        # Attitude data with warnings
+        pitch = attitude_data['pitch']
+        roll = attitude_data['roll']
+        
+        # Update blinking state
+        self.update_blink_state()
+        
+        # Check for excessive pitch (nose up/down)
+        pitch_warning = abs(pitch) > self.max_pitch_angle
+        pitch_color = "RED" if pitch_warning and self.blink_state else "WHITE"
+        pitch_text = f"PITCH: {pitch:.1f}°"
+        if pitch_warning and self.blink_state:
+            pitch_text = f"⚠ {pitch_text} ⚠"
+        
+        draw.text((10, y_pos), pitch_text, fill=pitch_color, font=self.font_large)
         y_pos += 30
         
-        # Attitude data
-        draw.text((10, y_pos), f"PITCH: {attitude_data['pitch']:.1f}°", fill="WHITE", font=self.font_medium)
-        y_pos += 20
-        draw.text((10, y_pos), f"ROLL: {attitude_data['roll']:.1f}°", fill="WHITE", font=self.font_medium)
+        # Check for excessive bank (roll left/right)
+        bank_warning = abs(roll) > self.max_bank_angle
+        bank_color = "RED" if bank_warning and self.blink_state else "WHITE"
+        roll_text = f"ROLL: {roll:.1f}°"
+        if bank_warning and self.blink_state:
+            roll_text = f"⚠ {roll_text} ⚠"
+        
+        draw.text((10, y_pos), roll_text, fill=bank_color, font=self.font_large)
         y_pos += 30
         
-        # Button instructions
-        draw.text((10, y_pos), "KEY1: Attitude", fill="CYAN", font=self.font_small)
-        y_pos += 20
-        draw.text((10, y_pos), "KEY2: Traffic", fill="CYAN", font=self.font_small)
-        y_pos += 20
-        draw.text((10, y_pos), "KEY3: Camera", fill="CYAN", font=self.font_small)
-        
+        # Large center-screen warnings
+        if (pitch_warning or bank_warning) and self.blink_state:
+            center_x = self.lcd.width // 2
+            center_y = self.lcd.height // 2
+            
+            if pitch_warning:
+                warning_text = "PITCH ANGLE!"
+                warning_bbox = draw.textbbox((0, 0), warning_text, font=self.font_large)
+                warning_width = warning_bbox[2] - warning_bbox[0]
+                draw.rectangle((center_x - warning_width//2 - 10, center_y - 20, 
+                              center_x + warning_width//2 + 10, center_y + 20), fill="RED")
+                draw.text((center_x - warning_width//2, center_y - 12), warning_text, fill="WHITE", font=self.font_large)
+            
+            if bank_warning:
+                warning_text = "BANK ANGLE!"
+                warning_bbox = draw.textbbox((0, 0), warning_text, font=self.font_large)
+                warning_width = warning_bbox[2] - warning_bbox[0]
+                warning_y = center_y + 30 if pitch_warning else center_y
+                draw.rectangle((center_x - warning_width//2 - 10, warning_y - 20, 
+                              center_x + warning_width//2 + 10, warning_y + 20), fill="RED")
+                draw.text((center_x - warning_width//2, warning_y - 12), warning_text, fill="WHITE", font=self.font_large)
+                
         # Display image
         im_r = background.rotate(270)
         self.lcd.ShowImage(im_r)
@@ -332,23 +398,58 @@ class PilotAssistantSystem:
         background = Image.new("RGB", (self.lcd.width, self.lcd.height), "BLACK")
         draw = ImageDraw.Draw(background)
         
+        # Update blinking state
+        self.update_blink_state()
+        
         # Use the same drawing function as gyro_menu
         self.draw_artificial_horizon(draw, self.lcd.width, self.lcd.height, pitch, roll)
         
-        # Display pitch and roll values (overlay on horizon)
-        draw.text((5, 5), 'Pitch', fill="YELLOW", font=self.font_medium)
-        draw.text((5, 30), f"{pitch:.1f}°", fill="YELLOW", font=self.font_medium)
+        # Check for warnings
+        pitch_warning = abs(pitch) > self.max_pitch_angle
+        bank_warning = abs(roll) > self.max_bank_angle
         
-        # Right-align Roll label and value
-        roll_text = 'Roll'
-        roll_value = f"{roll:.1f}°"
-        roll_bbox = draw.textbbox((0, 0), roll_text, font=self.font_medium)
+        # Display pitch values with warning
+        pitch_color = "RED" if pitch_warning and self.blink_state else "YELLOW"
+        pitch_label = "⚠ Pitch" if pitch_warning and self.blink_state else "Pitch"
+        pitch_value = f"⚠ {pitch:.1f}°" if pitch_warning and self.blink_state else f"{pitch:.1f}°"
+        
+        draw.text((5, 5), pitch_label, fill=pitch_color, font=self.font_medium)
+        draw.text((5, 30), pitch_value, fill=pitch_color, font=self.font_medium)
+        
+        # Display roll values with warning (right-aligned)
+        roll_color = "RED" if bank_warning and self.blink_state else "YELLOW"
+        roll_label = "⚠ Roll" if bank_warning and self.blink_state else "Roll"
+        roll_value = f"⚠ {roll:.1f}°" if bank_warning and self.blink_state else f"{roll:.1f}°"
+        
+        roll_bbox = draw.textbbox((0, 0), roll_label, font=self.font_medium)
         roll_width = roll_bbox[2] - roll_bbox[0]
         value_bbox = draw.textbbox((0, 0), roll_value, font=self.font_medium)
         value_width = value_bbox[2] - value_bbox[0]
         
-        draw.text((self.lcd.width - roll_width - 5, 5), roll_text, fill="YELLOW", font=self.font_medium)
-        draw.text((self.lcd.width - value_width - 5, 30), roll_value, fill="YELLOW", font=self.font_medium)
+        draw.text((self.lcd.width - roll_width - 5, 5), roll_label, fill=roll_color, font=self.font_medium)
+        draw.text((self.lcd.width - value_width - 5, 30), roll_value, fill=roll_color, font=self.font_medium)
+        
+        # Large center-screen warnings on attitude display
+        if (pitch_warning or bank_warning) and self.blink_state:
+            center_x = self.lcd.width // 2
+            center_y = self.lcd.height // 2
+            
+            if pitch_warning:
+                warning_text = "PITCH ANGLE!"
+                warning_bbox = draw.textbbox((0, 0), warning_text, font=self.font_large)
+                warning_width = warning_bbox[2] - warning_bbox[0]
+                draw.rectangle((center_x - warning_width//2 - 10, center_y - 20, 
+                              center_x + warning_width//2 + 10, center_y + 20), fill="RED")
+                draw.text((center_x - warning_width//2, center_y - 12), warning_text, fill="WHITE", font=self.font_large)
+            
+            if bank_warning:
+                warning_text = "BANK ANGLE!"
+                warning_bbox = draw.textbbox((0, 0), warning_text, font=self.font_large)
+                warning_width = warning_bbox[2] - warning_bbox[0]
+                warning_y = center_y + 30 if pitch_warning else center_y
+                draw.rectangle((center_x - warning_width//2 - 10, warning_y - 20, 
+                              center_x + warning_width//2 + 10, warning_y + 20), fill="RED")
+                draw.text((center_x - warning_width//2, warning_y - 12), warning_text, fill="WHITE", font=self.font_large)
         
         # Instructions
         draw.text((10, 220), "CENTER: Back", fill="CYAN", font=self.font_small)

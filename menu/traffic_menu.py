@@ -171,7 +171,21 @@ def lat_lon_to_xy(lat, lon, center_lat, center_lon, center_y=130, scale=2.0):
 def display_traffic_page(lcd):
     """Display aircraft traffic visualization page with GPS status"""
     print("Displaying traffic page...")
-    
+
+    # Import Pico2 button states from library module
+    try:
+        import library.pico_state
+        pico2_button_states = library.pico_state.pico2_button_states
+    except:
+        # Fallback if library module not available
+        pico2_button_states = {
+            'up_pressed': False,
+            'down_pressed': False,
+            'press_pressed': False,
+            'key1_pressed': False,
+            'key2_pressed': False
+        }
+
     font_small = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMono.ttf', 14)
     font_medium = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 18)
     font_large = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 24)
@@ -181,6 +195,14 @@ def display_traffic_page(lcd):
     last_state = lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN)
     last_up_state = lcd.digital_read(lcd.GPIO_KEY_UP_PIN)
     last_down_state = lcd.digital_read(lcd.GPIO_KEY_DOWN_PIN)
+
+    # Pico2 button state tracking for edge detection
+    # Initialize with current state to avoid immediate trigger from menu selection
+    last_pico2_states = pico2_button_states.copy()
+    # Ensure all expected keys exist in last_pico2_states
+    for key in ['up_pressed', 'down_pressed', 'left_pressed', 'right_pressed', 'press_pressed', 'key1_pressed', 'key2_pressed']:
+        if key not in last_pico2_states:
+            last_pico2_states[key] = False
     
     # Initialize variables
     user_lat, user_lon, pos_source = None, None, "LOADING"
@@ -289,14 +311,19 @@ def display_traffic_page(lcd):
     
     # Show initial display immediately
     draw_display("Loading position...")
-    
+
+    # Small delay to avoid immediate exit from menu selection button press
+    time.sleep(0.2)
+
     try:
         while True:
-            # Check for exit button
+            # Check for exit button (LCD or Pico2)
             current_state = lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN)
-            if current_state == 0 and last_state == 1:
+            current_pico2_press = pico2_button_states['press_pressed']
+
+            if (current_state == 0 and last_state == 1) or (current_pico2_press and not last_pico2_states['press_pressed']):
                 time.sleep(0.05)  # Debounce
-                if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 0:
+                if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 0 or current_pico2_press:
                     break
             last_state = current_state
             
@@ -304,11 +331,12 @@ def display_traffic_page(lcd):
             if aircraft_list:
                 sorted_aircraft_list = sorted(aircraft_list, key=lambda ac: ac['distance_km'])
             
-            # Check for UP button - next aircraft
+            # Check for UP button - next aircraft (LCD or Pico2)
             up_state = lcd.digital_read(lcd.GPIO_KEY_UP_PIN)
-            if up_state == 0 and last_up_state == 1:
+            current_pico2_up = pico2_button_states['up_pressed']
+            if (up_state == 0 and last_up_state == 1) or (current_pico2_up and not last_pico2_states['up_pressed']):
                 time.sleep(0.05)  # Debounce
-                if lcd.digital_read(lcd.GPIO_KEY_UP_PIN) == 0 and sorted_aircraft_list:
+                if (lcd.digital_read(lcd.GPIO_KEY_UP_PIN) == 0 or current_pico2_up) and sorted_aircraft_list:
                     # Go to next aircraft (forward in list)
                     current_aircraft_index = (current_aircraft_index + 1) % len(sorted_aircraft_list)
                     selected_aircraft = sorted_aircraft_list[current_aircraft_index]
@@ -316,11 +344,12 @@ def display_traffic_page(lcd):
                     aircraft_info_timeout = time.time() + 15  # Show for 15 seconds
             last_up_state = up_state
             
-            # Check for DOWN button - previous aircraft
+            # Check for DOWN button - previous aircraft (LCD or Pico2)
             down_state = lcd.digital_read(lcd.GPIO_KEY_DOWN_PIN)
-            if down_state == 0 and last_down_state == 1:
+            current_pico2_down = pico2_button_states['down_pressed']
+            if (down_state == 0 and last_down_state == 1) or (current_pico2_down and not last_pico2_states['down_pressed']):
                 time.sleep(0.05)  # Debounce
-                if lcd.digital_read(lcd.GPIO_KEY_DOWN_PIN) == 0 and sorted_aircraft_list:
+                if (lcd.digital_read(lcd.GPIO_KEY_DOWN_PIN) == 0 or current_pico2_down) and sorted_aircraft_list:
                     # Go to previous aircraft (backward in list)
                     current_aircraft_index = (current_aircraft_index - 1) % len(sorted_aircraft_list)
                     selected_aircraft = sorted_aircraft_list[current_aircraft_index]
@@ -378,9 +407,12 @@ def display_traffic_page(lcd):
                 last_update = current_time
                 print(f"Found {len(aircraft_list)} aircraft")
             
+            # Update Pico2 button states for edge detection
+            last_pico2_states = pico2_button_states.copy()
+
             # Update display
             draw_display()
-            
+
             time.sleep(0.1)  # Update display at 10 FPS
             
     finally:

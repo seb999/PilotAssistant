@@ -57,6 +57,20 @@ def display_gps_page(lcd):
     print("Displaying GPS page...")
     if DEBUG_MODE:
         print("DEBUG MODE: Using Stockholm coordinates")
+
+    # Import Pico2 button states from library module
+    try:
+        import library.pico_state
+        pico2_button_states = library.pico_state.pico2_button_states
+    except:
+        # Fallback if library module not available
+        pico2_button_states = {
+            'up_pressed': False,
+            'down_pressed': False,
+            'press_pressed': False,
+            'key1_pressed': False,
+            'key2_pressed': False
+        }
     
     font_title = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 28)
     font_large = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 24)
@@ -94,6 +108,9 @@ def display_gps_page(lcd):
     
     # Show initial page immediately
     display_initial_page()
+
+    # Small delay to avoid immediate exit from menu selection button press
+    time.sleep(0.2)
     
     # Handle debug mode or real GPS
     if DEBUG_MODE:
@@ -146,12 +163,18 @@ def display_gps_page(lcd):
             im_r = background.rotate(270)
             lcd.ShowImage(im_r)
             
-            # Wait for button press to exit
+            # Wait for button press to exit (LCD or Pico2)
+            last_pico2_press = False
             while True:
+                # Check LCD button
                 if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 0:
                     time.sleep(0.1)
                     if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 1:
                         break
+                # Check Pico2 button
+                if pico2_button_states['press_pressed'] and not last_pico2_press:
+                    break
+                last_pico2_press = pico2_button_states['press_pressed']
                 time.sleep(0.1)
             return
     
@@ -161,16 +184,26 @@ def display_gps_page(lcd):
     display_update_counter = 0
     # Initialize with current button state to avoid immediate exit
     last_state = lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN)
-    
+    last_pico2_press = pico2_button_states.get('press_pressed', False)
+
     try:
         while True:
-            # Check for exit button (responsive input)
+            # Check for exit button (responsive input) - LCD or Pico2
             current_state = lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN)
+            current_pico2_press = pico2_button_states['press_pressed']
+
+            # Check LCD button press
             if current_state == 0 and last_state == 1:
                 time.sleep(0.05)  # Debounce
                 if lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN) == 0:
                     break
+
+            # Check Pico2 button press
+            if current_pico2_press and not last_pico2_press:
+                break
+
             last_state = current_state
+            last_pico2_press = current_pico2_press
             
             # Handle GPS data based on mode
             if DEBUG_MODE:

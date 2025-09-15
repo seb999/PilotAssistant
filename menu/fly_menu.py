@@ -4,7 +4,21 @@ import library.state
 
 def display_fly_page(lcd, font4):
     """Display the Go FLY page with prominent flight-ready interface"""
-    
+
+    # Import Pico2 button states from library module
+    try:
+        import library.pico2_state
+        pico2_button_states = library.pico2_state.pico2_button_states
+    except:
+        # Fallback if library module not available
+        pico2_button_states = {
+            'up_pressed': False,
+            'down_pressed': False,
+            'press_pressed': False,
+            'key1_pressed': False,
+            'key2_pressed': False
+        }
+
     # Load larger fonts for prominent display
     try:
         font_huge = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 48)
@@ -16,6 +30,10 @@ def display_fly_page(lcd, font4):
         font_medium = font4
 
     last_press = lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN)
+    last_pico2_press = pico2_button_states.get('press_pressed', False)
+
+    # Small delay to avoid immediate exit from menu selection button press
+    time.sleep(0.2)
 
     while True:
         # Create a fresh image each loop
@@ -73,12 +91,16 @@ def display_fly_page(lcd, font4):
         # Add decorative border
         draw.rectangle((2, 2, lcd.width-3, lcd.height-3), outline="MAGENTA", width=2)
 
-        # Handle center press button to exit
+        # Handle center press button to exit (LCD or Pico2)
         press = lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN)
-        if press == 0 and last_press == 1:
+        current_pico2_press = pico2_button_states['press_pressed']
+
+        if (press == 0 and last_press == 1) or (current_pico2_press and not last_pico2_press):
             print("PRESS pressed → returning to main menu")
             return
+
         last_press = press
+        last_pico2_press = current_pico2_press
 
         # Display everything
         im_r = background.rotate(270)

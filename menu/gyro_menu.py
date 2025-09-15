@@ -128,6 +128,19 @@ def draw_artificial_horizon(draw, width, height, pitch, roll):
     draw.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill="YELLOW")
 
 def display_setup_page(lcd, font4):
+    # Import Pico2 button states from library module
+    try:
+        import library.pico_state
+        pico2_button_states = library.pico_state.pico2_button_states
+    except:
+        # Fallback if library module not available
+        pico2_button_states = {
+            'up_pressed': False,
+            'down_pressed': False,
+            'press_pressed': False,
+            'key1_pressed': False,
+            'key2_pressed': False
+        }
     font_large = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 32)
     
     pitch = 0
@@ -138,55 +151,74 @@ def display_setup_page(lcd, font4):
     last_right = 1
     last_press = lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN)
     last_key2 = lcd.digital_read(lcd.GPIO_KEY2_PIN)
+
+    # Pico2 button state tracking for edge detection
+    # Initialize with current state to avoid immediate trigger from menu selection
+    last_pico2_states = pico2_button_states.copy()
+    # Ensure all expected keys exist in last_pico2_states
+    for key in ['up_pressed', 'down_pressed', 'left_pressed', 'right_pressed', 'press_pressed', 'key1_pressed', 'key2_pressed']:
+        if key not in last_pico2_states:
+            last_pico2_states[key] = False
+
     library.state.pitch_offset = pitch
     library.state.bank_offset = bank
-    
+
     # Initialize ADXL345
     adxl_bus = init_adxl345()
+
+    # Small delay to avoid immediate exit from menu selection button press
+    time.sleep(0.2)
 
     while True:
         # Create a fresh image each loop
         background = Image.new("RGB", (lcd.width, lcd.height), "BLACK")
         draw = ImageDraw.Draw(background)
 
-        # Handle joystick input
+        # Handle joystick input (LCD or Pico2)
         up = lcd.digital_read(lcd.GPIO_KEY_UP_PIN)
-        if up == 0 and last_up == 1:
+        pico2_up_pressed = pico2_button_states['up_pressed'] and not last_pico2_states['up_pressed']
+        if (up == 0 and last_up == 1) or pico2_up_pressed:
             pitch -= 1
             library.state.pitch_offset -= 1
             print("UP pressed → pitch =", pitch)
         last_up = up
 
         down = lcd.digital_read(lcd.GPIO_KEY_DOWN_PIN)
-        if down == 0 and last_down == 1:
+        pico2_down_pressed = pico2_button_states['down_pressed'] and not last_pico2_states['down_pressed']
+        if (down == 0 and last_down == 1) or pico2_down_pressed:
             pitch += 1
             library.state.pitch_offset += 1
             print("DOWN pressed → pitch =", pitch)
         last_down = down
 
         left = lcd.digital_read(lcd.GPIO_KEY_LEFT_PIN)
-        if left == 0 and last_left == 1:
+        pico2_left_pressed = pico2_button_states.get('left_pressed', False) and not last_pico2_states.get('left_pressed', False)
+        if (left == 0 and last_left == 1) or pico2_left_pressed:
             bank -= 1
             library.state.bank_offset -= 1
             print("LEFT pressed → bank =", bank)
         last_left = left
 
         right = lcd.digital_read(lcd.GPIO_KEY_RIGHT_PIN)
-        if right == 0 and last_right == 1:
+        pico2_right_pressed = pico2_button_states.get('right_pressed', False) and not last_pico2_states.get('right_pressed', False)
+        if (right == 0 and last_right == 1) or pico2_right_pressed:
             bank += 1
             library.state.bank_offset += 1
             print("RIGHT pressed → bank =", bank)
         last_right = right
 
         press = lcd.digital_read(lcd.GPIO_KEY_PRESS_PIN)
-        if press == 0 and last_press == 1:
+        pico2_press_pressed = pico2_button_states['press_pressed'] and not last_pico2_states['press_pressed']
+
+        if (press == 0 and last_press == 1) or pico2_press_pressed:
             print("PRESS pressed → returning to main menu")
             return
         last_press = press
 
-        # Handle KEY2 press to switch to streaming page
+        # Handle KEY2 press to switch to streaming page (LCD or Pico2)
         key2 = lcd.digital_read(lcd.GPIO_KEY2_PIN)
-        if key2 == 0 and last_key2 == 1:
+        pico2_key2_pressed = pico2_button_states['key2_pressed'] and not last_pico2_states['key2_pressed']
+        if (key2 == 0 and last_key2 == 1) or pico2_key2_pressed:
             print("KEY2 pressed → switching to streaming page")
             # Dynamic import to avoid circular dependency
             from menu.stream_menu import display_stream_page
@@ -194,15 +226,15 @@ def display_setup_page(lcd, font4):
             # Re-initialize ADXL345 after returning from stream page
             adxl_bus = init_adxl345()
         last_key2 = key2
+
+        # Update Pico2 button states for edge detection
+        last_pico2_states = pico2_button_states.copy()
        
         accel_pitch, accel_roll = read_adxl345_data(adxl_bus)
         
         # Apply calibration offsets
         calibrated_pitch = accel_pitch - library.state.pitch_offset
         calibrated_roll = accel_roll - library.state.bank_offset
-        
-        # Display calibrated values in terminal
-        print(f"Calibrated Pitch: {calibrated_pitch:.1f}°, Calibrated Roll: {calibrated_roll:.1f}°")
         
         # Draw artificial horizon using full screen
         draw_artificial_horizon(draw, lcd.width, lcd.height, calibrated_pitch, calibrated_roll)
