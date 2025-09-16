@@ -17,6 +17,7 @@ from picamera2 import Picamera2
 from gpiozero import DigitalOutputDevice
 from library.config import GPS_EN_PIN, GPS_PORT, GPS_BAUDRATE, GPS_TIMEOUT
 import library.pico_state
+from library.screen_mirror import screen_mirror
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -56,54 +57,23 @@ def send_pico2_command(command):
         ser.write(f"{command}\n".encode('utf-8'))
         ser.close()
         print(f"Sent to Pico2: {command}")
+
+        # Handle screen mirroring commands
+        if command == "MIRROR_ON":
+            screen_mirror.enable_mirroring()
+        elif command == "MIRROR_OFF":
+            screen_mirror.disable_mirroring()
+        elif command.startswith("MIRROR_QUALITY_"):
+            try:
+                quality = float(command.split("_")[2])
+                screen_mirror.set_quality(quality)
+            except:
+                pass
+
     except Exception as e:
         print(f"Error sending command to Pico2: {e}")
 
-def send_image_to_pico2(image):
-    """Send PIL image to Pico2 for display (non-blocking)"""
-    try:
-        # Resize image to 240x240 to match Pico2 display
-        image_resized = image.resize((240, 240))
-
-        # Convert to RGB if not already
-        if image_resized.mode != 'RGB':
-            image_resized = image_resized.convert('RGB')
-
-        # Convert to 16-bit RGB565 format that ST7789 expects
-        pixels = []
-        for y in range(240):
-            for x in range(240):
-                r, g, b = image_resized.getpixel((x, y))
-                # Convert RGB888 to RGB565
-                rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-                # Pack as 2 bytes (big-endian)
-                pixels.append((rgb565 >> 8) & 0xFF)  # High byte
-                pixels.append(rgb565 & 0xFF)         # Low byte
-
-        # Send to Pico2 using the existing frame protocol
-        frame_data = bytes(pixels)
-        frame_message = b"FRAME:240x240:" + frame_data + b"\n"
-
-        print(f"Sending {len(frame_data)} bytes of image data to Pico2...")
-
-        # Use shorter timeout and send in background thread to avoid blocking
-        import threading
-
-        def send_data():
-            try:
-                ser = serial.Serial(PICO2_PORT, PICO2_BAUDRATE, timeout=0.5)
-                ser.write(frame_message)
-                ser.close()
-                print("Image sent to Pico2 successfully")
-            except Exception as e:
-                print(f"Error sending image to Pico2: {e}")
-
-        # Send in background thread
-        thread = threading.Thread(target=send_data, daemon=True)
-        thread.start()
-
-    except Exception as e:
-        print(f"Error preparing image for Pico2: {e}")
+# Legacy function - now handled by screen_mirror module automatically
 
 def pico2_listener():
     """Background thread to listen for Pico2 button presses"""
