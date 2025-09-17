@@ -17,7 +17,6 @@ from picamera2 import Picamera2
 from gpiozero import DigitalOutputDevice
 from library.config import GPS_EN_PIN, GPS_PORT, GPS_BAUDRATE, GPS_TIMEOUT
 import library.pico_state
-from library.screen_mirror import screen_mirror
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -50,30 +49,6 @@ font4 = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf'
 font_large = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 30)
 font_medium = ImageFont.truetype('/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf', 20)
 
-def send_pico2_command(command):
-    """Send a command to Pico2"""
-    try:
-        ser = serial.Serial(PICO2_PORT, PICO2_BAUDRATE, timeout=1)
-        ser.write(f"{command}\n".encode('utf-8'))
-        ser.close()
-        print(f"Sent to Pico2: {command}")
-
-        # Handle screen mirroring commands
-        if command == "MIRROR_ON":
-            screen_mirror.enable_mirroring()
-        elif command == "MIRROR_OFF":
-            screen_mirror.disable_mirroring()
-        elif command.startswith("MIRROR_QUALITY_"):
-            try:
-                quality = float(command.split("_")[2])
-                screen_mirror.set_quality(quality)
-            except:
-                pass
-
-    except Exception as e:
-        print(f"Error sending command to Pico2: {e}")
-
-# Legacy function - now handled by screen_mirror module automatically
 
 def pico2_listener():
     """Background thread to listen for Pico2 button presses"""

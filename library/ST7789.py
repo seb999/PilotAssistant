@@ -2,13 +2,6 @@
 import time
 from library import config
 
-# Import screen mirror for automatic Pico mirroring
-try:
-    from library.screen_mirror import screen_mirror
-    SCREEN_MIRROR_AVAILABLE = True
-except ImportError:
-    SCREEN_MIRROR_AVAILABLE = False
-    print("Screen mirroring not available")
 
 class ST7789(config.RaspberryPi):
 
@@ -152,9 +145,6 @@ class ST7789(config.RaspberryPi):
         for i in range(0,len(pix),4096):
             self.spi_writebyte(pix[i:i+4096])
 
-        # Mirror to Pico screen automatically
-        if SCREEN_MIRROR_AVAILABLE:
-            screen_mirror.mirror_image(Image)
         
     def clear(self):
         """Clear contents of image buffer"""
