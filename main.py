@@ -242,7 +242,7 @@ def display_status_page():
         draw.text((10, 215), "to continue", fill="CYAN", font=font_large)
         
         # Display image
-        im_r = background.rotate(270)
+        im_r = background.rotate(270).transpose(Image.FLIP_LEFT_RIGHT)
         lcd.ShowImage(im_r)
         
         # Check for ENTER button press (responsive) - LCD or Pico2
@@ -260,7 +260,7 @@ def display_status_page():
 
 # Splash screen
 image = Image.open('./images/output.png')
-im_r = image.rotate(270)
+im_r = image.rotate(270).transpose(Image.FLIP_LEFT_RIGHT)
 lcd.ShowImage(im_r)
 
 # Send splash command to Pico2 (skip large image for now)
