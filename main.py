@@ -259,7 +259,7 @@ def display_status_page():
         update_counter += 1
 
 # Splash screen
-image = Image.open('./images/output.png')
+image = Image.open('./images/Splash.png')
 im_r = image.rotate(270).transpose(Image.FLIP_LEFT_RIGHT)
 lcd.ShowImage(im_r)
 
