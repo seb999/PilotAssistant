@@ -26,18 +26,24 @@ print("LED initialized")
 # -----------------------
 # Initialize InputHandler
 # -----------------------
-default_pins = {
-    'up': 2,
-    'press': 3,
-    'down': 18,
-    'left': 16,
-    'right': 20,
-    'key1': 15,
-    'key2': 17,
-    'key3': 19,
-    'key4': 21
+# Digital buttons only (no joystick pins since we use ADC)
+button_pins = {
+    'key1': 2,
+    'key2': 3,
+    'key3': 17,
+    'key4': 15
 }
-inputs = InputHandler(pin_map=default_pins)
+
+# ADC joystick configuration
+joystick_config = {
+    'vrx': 27,  # X-axis ADC pin
+    'vry': 26,  # Y-axis ADC pin
+    'sw': 16,   # Button pin
+    'center_min': 25000,
+    'center_max': 40000
+}
+
+inputs = InputHandler(pin_map=button_pins, joystick_config=joystick_config)
 print("InputHandler initialized")
 
 # -----------------------
@@ -49,6 +55,8 @@ try:
     display_available = True
 except Exception as e:
     print(f"Display not available: {e}")
+    import sys
+    sys.print_exception(e)
     display_available = False
 
 print("Pico2 ready for dual mode operation")
@@ -119,15 +127,18 @@ last_selection_index = -2  # Track previous selection for partial updates
 
 # Colors
 BLACK = rgb565(0, 0, 0)
+WHITE = rgb565(255, 255, 255)
 CYAN = rgb565(0, 255, 255)
+YELLOW = rgb565(255, 255, 0)
 MAGENTA = rgb565(255, 0, 255)
+PURPLE = rgb565(128, 0, 128)
 
 print(f"Color values - BLACK: 0x{BLACK:04X}, CYAN: 0x{CYAN:04X}, MAGENTA: 0x{MAGENTA:04X}")
 
-# Menu item positions matching pilot_assistant_system.py
+# Menu item positions - no title, larger text (updated for 320x240)
 label_positions = [
-    (5, 65, 235, 95),   # Go Fly
-    (5, 100, 235, 130)  # Bluetooth
+    (5, 20, 315, 55),   # Go Fly - wider for 320px screen
+    (5, 60, 315, 95)    # Bluetooth - wider for 320px screen
 ]
 
 def draw_menu_item(item_index, selected=False):
@@ -137,26 +148,26 @@ def draw_menu_item(item_index, selected=False):
 
     rect = label_positions[item_index]
     item = menu_items[item_index]
-    menu_font_size = 2
+    menu_font_size = 3
 
     if selected:
-        # Selected item - draw CYAN rectangle background
+        # Selected item - draw YELLOW rectangle background
         rect_width = rect[2] - rect[0]
         rect_height = rect[3] - rect[1]
-        display.draw_rect(rect[0], rect[1], rect_width, rect_height, CYAN)
+        display.draw_rect(rect[0], rect[1], rect_width, rect_height, YELLOW)
 
-        # Draw BLACK text on CYAN background with vertical centering
+        # Draw BLACK text on YELLOW background with vertical centering
         text_height = 8 * menu_font_size
         text_y = rect[1] + (rect_height - text_height) // 2 - 2
         draw_text_direct(display, item, rect[0] + 5, text_y, BLACK, menu_font_size)
     else:
-        # Unselected item - clear background and draw CYAN text
+        # Unselected item - black background and draw YELLOW text
         rect_width = rect[2] - rect[0]
         rect_height = rect[3] - rect[1]
-        display.draw_rect(rect[0], rect[1], rect_width, rect_height, BLACK)  # Clear background
+        display.draw_rect(rect[0], rect[1], rect_width, rect_height, BLACK)  # Keep black background
 
         text_y = rect[1] + 5  # Small offset from top
-        draw_text_direct(display, item, rect[0] + 5, text_y, CYAN, menu_font_size)
+        draw_text_direct(display, item, rect[0] + 5, text_y, YELLOW, menu_font_size)
 
 def init_menu_display():
     """Initialize the menu display (full redraw)"""
@@ -164,14 +175,10 @@ def init_menu_display():
     if not display_available:
         return
 
-    # Clear screen with black background (0x0000)
-    display.clear(0x0000)
+    # Clear screen with black background
+    display.clear(BLACK)
 
-    # Title "PILOT ASSISTANT" - centered with proper positioning
-    title_text = "PILOT ASSISTANT"
-    title_font_size = 2  # Larger title font
-    title_x = (display.width - len(title_text) * 8 * title_font_size) // 2  # Center the title
-    draw_text_direct(display, title_text, title_x, 8, MAGENTA, title_font_size)
+    # No title - just clear screen background
 
     # Draw all menu items
     for i in range(len(menu_items)):
@@ -199,48 +206,35 @@ def update_menu_display():
 
     last_selection_index = selection_index
 
-# Show splash screen for 2 seconds
+# Show splash screen for 2 seconds IMMEDIATELY
 if display_available:
+    # First clear the display immediately to avoid showing anything else
+    display.clear(BLACK)
+
     try:
         # Use enhanced splash loader with multiple fallback options
         show_splash_screen(display)
-
-        # Add text overlay on top of image
-        splash_text = "PILOT ASSISTANT"
-        subtitle_text = "STARTING..."
-
-        splash_font_size = 2
-        splash_x = (display.width - len(splash_text) * 8 * splash_font_size) // 2
-        splash_y = 200  # Near bottom to overlay on image
-
-        subtitle_x = (display.width - len(subtitle_text) * 8 * splash_font_size) // 2
-        subtitle_y = splash_y + 25
-
-        # Draw text with semi-transparent effect by drawing shadow first
-        draw_text_direct(display, splash_text, splash_x + 1, splash_y + 1, BLACK, splash_font_size)
-        draw_text_direct(display, splash_text, splash_x, splash_y, MAGENTA, splash_font_size)
-
-        draw_text_direct(display, subtitle_text, subtitle_x + 1, subtitle_y + 1, BLACK, splash_font_size)
-        draw_text_direct(display, subtitle_text, subtitle_x, subtitle_y, CYAN, splash_font_size)
 
         print("Splash screen with overlay displayed")
 
         # Wait for 2 seconds
         time.sleep(2)
 
+        # Now show the menu after splash is done
+        init_menu_display()
+
     except Exception as e:
         print(f"Error displaying splash: {e}")
         # Ultimate fallback
         try:
-            display.clear(0x0000)
-            draw_text_direct(display, "STARTING...", 50, 120, CYAN, 2)
+            display.clear(BLACK)
+            draw_text_direct(display, "STARTING...", 80, 120, YELLOW, 2)
             time.sleep(2)
+            # Show menu after fallback splash
+            init_menu_display()
         except:
-            pass
-
-# Show initial menu
-if display_available:
-    init_menu_display()
+            # If everything fails, still try to show menu
+            init_menu_display()
 
 # -----------------------
 # Main loop

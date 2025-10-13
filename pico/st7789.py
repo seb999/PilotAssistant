@@ -8,7 +8,7 @@ from machine import Pin, SPI
 
 
 class ST7789:
-    def __init__(self, width=240, height=240, spi_id=1,
+    def __init__(self, width=320, height=240, spi_id=1,
                  dc_pin=8, rst_pin=12, cs_pin=9, bl_pin=13):
         print("[ST7789] init start")
         self.width = width
@@ -68,6 +68,17 @@ class ST7789:
         self.dc.value(1)
         self.cs.value(0)
         self.spi.write(image_data)
+        self.cs.value(1)
+
+    def blit_buffer(self, buffer, x, y, width, height):
+        """Blit a buffer to the display at specified position"""
+        # Set the window for the blit operation
+        self.set_window(x, y, x + width, y + height)
+
+        # Write the buffer data
+        self.dc.value(1)
+        self.cs.value(0)
+        self.spi.write(buffer)
         self.cs.value(1)
 
     def draw_pixel(self, x, y, color):
@@ -137,24 +148,36 @@ class ST7789:
         self.fill(color)
 
     def reset(self):
+        # Wait for power to stabilize after cold boot
+        time.sleep_ms(200)
         self.rst.value(1)
-        time.sleep_ms(50)
+        time.sleep_ms(100)
         self.rst.value(0)
-        time.sleep_ms(50)
+        time.sleep_ms(100)
         self.rst.value(1)
-        time.sleep_ms(50)
+        time.sleep_ms(200)
 
     def init_display(self):
+        print("[ST7789] Starting reset sequence...")
         self.reset()
+        print("[ST7789] Reset complete")
 
         try:
+            # Software reset first (important for cold boot)
+            print("[ST7789] Sending software reset...")
+            self.write_cmd(0x01)
+            time.sleep_ms(150)
+            print("[ST7789] Software reset complete")
+
             # Sleep out
+            print("[ST7789] Sending sleep out command...")
             self.write_cmd(0x11)
             time.sleep_ms(120)
+            print("[ST7789] Sleep out complete")
 
             # Memory access control - fix rotation and color order
             self.write_cmd(0x36)
-            self.write_data(0x60)  # Row/Col exchange + RGB order to fix rotation
+            self.write_data(0xA0)  # Row/Col exchange + RGB order + 180° rotation
 
             # Pixel format (16bit / RGB565)
             self.write_cmd(0x3A)
@@ -216,10 +239,14 @@ class ST7789:
             self.write_cmd(0x21)
 
             # Display on
+            print("[ST7789] Turning display on...")
             self.write_cmd(0x29)
             time.sleep_ms(100)
+            print("[ST7789] Display initialization complete!")
         except Exception as e:
-            print(e)
+            print(f"[ST7789] Init error: {e}")
+            import sys
+            sys.print_exception(e)
 
     # --- the rest of your methods unchanged ---
 
