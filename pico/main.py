@@ -30,7 +30,7 @@ print("LED initialized")
 button_pins = {
     'key1': 2,
     'key2': 3,
-    'key3': 17,
+   # 'key3': 17, button glue by mistake
     'key4': 15
 }
 
@@ -50,8 +50,15 @@ print("InputHandler initialized")
 # Initialize Display
 # -----------------------
 try:
-    display = ST7789()
+    # Initialize display
+    print("Initializing display...")
+    import gc
+    gc.collect()
+    print(f"Free memory before display init: {gc.mem_free()} bytes")
+
+    display = ST7789()  # Use default 320x240 settings
     print("Display initialized successfully")
+    print(f"Free memory after display init: {gc.mem_free()} bytes")
     display_available = True
 except Exception as e:
     print(f"Display not available: {e}")
@@ -121,7 +128,7 @@ def draw_text_direct(display, text, x, y, color, font_size=1):
 
 
 # Menu setup
-menu_items = ['Go Fly', 'Bluetooth']
+menu_items = ['Go Fly', 'Bluetooth', 'Gyro Offset']
 selection_index = -1  # No default selection
 last_selection_index = -2  # Track previous selection for partial updates
 
@@ -138,11 +145,49 @@ print(f"Color values - BLACK: 0x{BLACK:04X}, CYAN: 0x{CYAN:04X}, MAGENTA: 0x{MAG
 # Menu item positions - no title, larger text (updated for 320x240)
 label_positions = [
     (5, 20, 315, 55),   # Go Fly - wider for 320px screen
-    (5, 60, 315, 95)    # Bluetooth - wider for 320px screen
+    (5, 60, 315, 95),   # Bluetooth - wider for 320px screen
+    (5, 100, 315, 135)  # Gyro Offset - wider for 320px screen
 ]
 
+def draw_icon(display, icon_name, x, y, color):
+    """Draw a simple icon at position x, y"""
+    if icon_name == "Go Fly":
+        # Aircraft icon - simple plane shape
+        # Wings (horizontal line)
+        display.draw_rect(x, y + 10, 24, 3, color)
+        # Fuselage (vertical line)
+        display.draw_rect(x + 10, y, 4, 20, color)
+        # Tail (small horizontal)
+        display.draw_rect(x + 6, y, 12, 3, color)
+
+    elif icon_name == "Bluetooth":
+        # Bluetooth icon - stylized B
+        # Vertical line
+        display.draw_rect(x + 8, y, 3, 20, color)
+        # Top triangle
+        for i in range(10):
+            display.draw_pixel(x + 11 + i//2, y + i, color)
+        # Bottom triangle
+        for i in range(10):
+            display.draw_pixel(x + 11 + i//2, y + 19 - i, color)
+
+    elif icon_name == "Gyro Offset":
+        # Gyro/calibration icon - circular with center dot
+        # Outer circle (draw as octagon for simplicity)
+        display.draw_rect(x + 4, y, 12, 2, color)      # Top
+        display.draw_rect(x + 4, y + 18, 12, 2, color)  # Bottom
+        display.draw_rect(x, y + 4, 2, 12, color)      # Left
+        display.draw_rect(x + 18, y + 4, 2, 12, color)  # Right
+        display.draw_rect(x + 2, y + 2, 2, 2, color)   # Corners
+        display.draw_rect(x + 16, y + 2, 2, 2, color)
+        display.draw_rect(x + 2, y + 16, 2, 2, color)
+        display.draw_rect(x + 16, y + 16, 2, 2, color)
+        # Center crosshair
+        display.draw_rect(x + 7, y + 9, 6, 2, color)  # Horizontal
+        display.draw_rect(x + 9, y + 7, 2, 6, color)  # Vertical
+
 def draw_menu_item(item_index, selected=False):
-    """Draw a single menu item efficiently"""
+    """Draw a single menu item efficiently with icon"""
     if not display_available or item_index >= len(menu_items):
         return
 
@@ -156,18 +201,28 @@ def draw_menu_item(item_index, selected=False):
         rect_height = rect[3] - rect[1]
         display.draw_rect(rect[0], rect[1], rect_width, rect_height, YELLOW)
 
-        # Draw BLACK text on YELLOW background with vertical centering
+        # Draw icon on left side
+        icon_x = rect[0] + 8
+        icon_y = rect[1] + (rect_height - 20) // 2
+        draw_icon(display, item, icon_x, icon_y, BLACK)
+
+        # Draw BLACK text on YELLOW background with vertical centering (shifted right for icon)
         text_height = 8 * menu_font_size
         text_y = rect[1] + (rect_height - text_height) // 2 - 2
-        draw_text_direct(display, item, rect[0] + 5, text_y, BLACK, menu_font_size)
+        draw_text_direct(display, item, rect[0] + 40, text_y, BLACK, menu_font_size)
     else:
         # Unselected item - black background and draw YELLOW text
         rect_width = rect[2] - rect[0]
         rect_height = rect[3] - rect[1]
         display.draw_rect(rect[0], rect[1], rect_width, rect_height, BLACK)  # Keep black background
 
+        # Draw icon on left side
+        icon_x = rect[0] + 8
+        icon_y = rect[1] + (rect_height - 20) // 2
+        draw_icon(display, item, icon_x, icon_y, YELLOW)
+
         text_y = rect[1] + 5  # Small offset from top
-        draw_text_direct(display, item, rect[0] + 5, text_y, YELLOW, menu_font_size)
+        draw_text_direct(display, item, rect[0] + 40, text_y, YELLOW, menu_font_size)
 
 def init_menu_display():
     """Initialize the menu display (full redraw)"""
@@ -269,7 +324,7 @@ while True:
                     update_menu_display()
                     print(f"UP - new selection: {selection_index}")
 
-                elif name == 'press':
+                elif name == 'right':
                     if selection_index >= 0:  # Only execute if valid selection
                         print(f"SELECTED: {menu_items[selection_index]}")
 
@@ -277,15 +332,31 @@ while True:
                             print("Launching Go Fly menu...")
                             if display_available:
                                 display_go_fly_menu(display, inputs)
-                                init_menu_display()  # Return to menu
+                                # Clear screen and redraw menu after exiting
+                                display.clear(BLACK)
+                                init_menu_display()
 
                         elif menu_items[selection_index] == "Bluetooth":
                             print("Launching Bluetooth menu...")
                             if display_available:
                                 display_bluetooth_menu(display, inputs)
-                                init_menu_display()  # Return to menu
+                                # Clear screen and redraw menu after exiting
+                                display.clear(BLACK)
+                                init_menu_display()
+
+                        elif menu_items[selection_index] == "Gyro Offset":
+                            print("Launching Gyro Offset menu...")
+                            if display_available:
+                                # TODO: Create gyro_offset_menu.py
+                                display.clear(BLACK)
+                                draw_text_direct(display, "GYRO OFFSET", 60, 100, YELLOW, 2)
+                                draw_text_direct(display, "Coming Soon", 70, 130, WHITE, 2)
+                                time.sleep(2)
+                                # Clear screen and redraw menu after exiting
+                                display.clear(BLACK)
+                                init_menu_display()
                     else:
-                        print("No valid selection - ignoring PRESS")
+                        print("No valid selection - ignoring RIGHT")
 
             else:  # released
                 print(f"{name} released")

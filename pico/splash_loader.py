@@ -3,16 +3,17 @@ Splash screen loader for RGB565 binary image
 """
 
 def show_splash_screen(display):
-    """Load and display RGB565 splash screen"""
+    """Load and display RGB565 splash screen for 320x240 display"""
     try:
-        width, height = 240, 230
+        # New splash dimensions for 320x240 LCD
+        width, height = 320, 240
 
-        with open("splash_rgb565.bin", "rb") as f:
+        with open("splashPico_RGB565.bin", "rb") as f:
             data = f.read()
 
-        # Show image (top-left corner at 0,0)
+        # Show image (full screen)
         display.blit_buffer(data, 0, 0, width, height)
-        print("RGB565 splash screen loaded successfully")
+        print("RGB565 splash screen loaded successfully (320x240)")
 
     except Exception as e:
         print(f"Error loading RGB565 splash: {e}")

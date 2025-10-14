@@ -147,6 +147,30 @@ class ST7789:
         """Clear screen with given color (default black)"""
         self.fill(color)
 
+    def color565(self, r, g, b):
+        """Convert RGB888 to RGB565 color format"""
+        return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
+    def draw_line(self, x0, y0, x1, y1, color):
+        """Draw a line using Bresenham's algorithm"""
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+
+        while True:
+            self.draw_pixel(x0, y0, color)
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x0 += sx
+            if e2 < dx:
+                err += dx
+                y0 += sy
+
     def reset(self):
         # Wait for power to stabilize after cold boot
         time.sleep_ms(200)

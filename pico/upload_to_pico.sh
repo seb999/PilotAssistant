@@ -12,9 +12,15 @@ echo "Project directory: $PROJECT_DIR"
 
 cd "$PROJECT_DIR"
 
+# -------------------------
+# Create menu directory
+# -------------------------
 echo "Creating menu directory on Pico..."
 mpremote connect $PICO_DEV mkdir menu 2>/dev/null || true
 
+# -------------------------
+# Upload main project files
+# -------------------------
 echo "Uploading main files..."
 mpremote connect $PICO_DEV cp boot.py :
 mpremote connect $PICO_DEV cp main.py :
@@ -22,15 +28,28 @@ mpremote connect $PICO_DEV cp st7789.py :
 mpremote connect $PICO_DEV cp input_handler.py :
 mpremote connect $PICO_DEV cp splash_loader.py :
 
-echo "Uploading splash screen files..."
-mpremote connect $PICO_DEV cp splash.png :
-echo "Uploading raw splash image..."
-mpremote connect $PICO_DEV cp splash_rgb565.bin :
 
+# -------------------------
+# Upload splash screen files
+# -------------------------
+echo "Uploading splash screen files..."
+echo "Uploading 320x240 RGB565 splash image..."
+mpremote connect $PICO_DEV cp splashPico_RGB565.bin :
+
+# -------------------------
+# Upload menu files
+# -------------------------
 echo "Uploading menu files..."
 mpremote connect $PICO_DEV cp menu/bluetooth_menu.py :menu/
 mpremote connect $PICO_DEV cp menu/go_fly_menu.py :menu/
+mpremote connect $PICO_DEV cp menu/artificial_horizon.py :menu/
 
+
+
+
+# -------------------------
+# Reset Pico to run new code
+# -------------------------
 echo "Resetting Pico..."
 mpremote connect $PICO_DEV reset
 
