@@ -1,0 +1,260 @@
+/**
+ * Pico Telemetry Receiver
+ * Receives flight telemetry data over USB serial and displays it on LCD
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include "pico/stdlib.h"
+#include "hardware/gpio.h"
+#include "telemetry_parser.h"
+#include "st7789_lcd.h"
+#include "img/splash_data.h"
+#include "input_handler.h"
+
+#define LED_PIN 25
+#define BUFFER_SIZE 1024
+
+// Buffer for incoming serial data
+static char rx_buffer[BUFFER_SIZE];
+static size_t rx_index = 0;
+
+// Latest telemetry data
+static TelemetryData latest_telemetry;
+static bool display_initialized = false;
+
+// Function to draw status icons at the top
+void draw_status_icons(void) {
+    // Status icons positioned at top right (all 32x32)
+    // WiFi at x=220, GPS at x=254, Bluetooth at x=288
+    lcd_draw_wifi_icon(220, 2, latest_telemetry.status.wifi);
+    lcd_draw_gps_icon(254, 2, latest_telemetry.status.gps);
+    lcd_draw_bluetooth_icon(288, 2, latest_telemetry.status.bluetooth);
+}
+
+// Function to draw static UI elements (only once)
+void draw_static_ui(void) {
+    // Clear screen with black background
+    lcd_clear(COLOR_BLACK);
+
+    // Title
+    lcd_draw_string(90, 5, "TELEMETRY", COLOR_CYAN, COLOR_BLACK);
+    lcd_fill_rect(0, 15, 320, 2, COLOR_CYAN);
+
+    // Own Aircraft section header
+    lcd_draw_string(5, 25, "OWNSHIP", COLOR_MAGENTA, COLOR_BLACK);
+    lcd_draw_string(5, 40, "LAT:", COLOR_WHITE, COLOR_BLACK);
+    lcd_draw_string(5, 52, "LON:", COLOR_WHITE, COLOR_BLACK);
+    lcd_draw_string(5, 64, "ALT:", COLOR_WHITE, COLOR_BLACK);
+
+    // Attitude section header
+    lcd_draw_string(5, 82, "ATTITUDE", COLOR_MAGENTA, COLOR_BLACK);
+    lcd_draw_string(5, 97, "PITCH:", COLOR_YELLOW, COLOR_BLACK);
+    lcd_draw_string(5, 109, "ROLL:", COLOR_YELLOW, COLOR_BLACK);
+    lcd_draw_string(5, 121, "YAW:", COLOR_YELLOW, COLOR_BLACK);
+
+    // Traffic section divider
+    lcd_fill_rect(0, 138, 320, 2, COLOR_CYAN);
+    lcd_draw_string(5, 145, "TRAFFIC", COLOR_MAGENTA, COLOR_BLACK);
+
+    display_initialized = true;
+}
+
+// Function to update only the dynamic telemetry values
+void update_telemetry_values(void) {
+    char buf[64];
+
+    // Update status icons at the top
+    draw_status_icons();
+
+    // Update ownship data values only (clear old text with black rectangle first)
+    lcd_fill_rect(40, 40, 280, 10, COLOR_BLACK);
+    snprintf(buf, sizeof(buf), "%.6f", latest_telemetry.own.lat);
+    lcd_draw_string(40, 40, buf, COLOR_WHITE, COLOR_BLACK);
+
+    lcd_fill_rect(40, 52, 280, 10, COLOR_BLACK);
+    snprintf(buf, sizeof(buf), "%.6f", latest_telemetry.own.lon);
+    lcd_draw_string(40, 52, buf, COLOR_WHITE, COLOR_BLACK);
+
+    lcd_fill_rect(40, 64, 280, 10, COLOR_BLACK);
+    snprintf(buf, sizeof(buf), "%.0f ft", latest_telemetry.own.alt);
+    lcd_draw_string(40, 64, buf, COLOR_WHITE, COLOR_BLACK);
+
+    // Update attitude values
+    lcd_fill_rect(55, 97, 265, 10, COLOR_BLACK);
+    snprintf(buf, sizeof(buf), "%.1f", latest_telemetry.own.pitch);
+    lcd_draw_string(55, 97, buf, COLOR_YELLOW, COLOR_BLACK);
+
+    lcd_fill_rect(55, 109, 265, 10, COLOR_BLACK);
+    snprintf(buf, sizeof(buf), "%.1f", latest_telemetry.own.roll);
+    lcd_draw_string(55, 109, buf, COLOR_YELLOW, COLOR_BLACK);
+
+    lcd_fill_rect(55, 121, 265, 10, COLOR_BLACK);
+    snprintf(buf, sizeof(buf), "%.1f", latest_telemetry.own.yaw);
+    lcd_draw_string(55, 121, buf, COLOR_YELLOW, COLOR_BLACK);
+
+    // Clear and update traffic section
+    lcd_fill_rect(0, 160, 320, 80, COLOR_BLACK);
+
+    int y = 160;
+    for (int i = 0; i < latest_telemetry.traffic_count && i < 3; i++) {
+        TrafficData* t = &latest_telemetry.traffic[i];
+        snprintf(buf, sizeof(buf), "%s: %.4f,%.4f @ %.0fft",
+                 t->id, t->lat, t->lon, t->alt);
+        lcd_draw_string(5, y, buf, COLOR_GREEN, COLOR_BLACK);
+        y += 12;
+    }
+}
+
+// Main display update function
+void update_lcd_display(void) {
+    if (!display_initialized) {
+        draw_static_ui();
+    }
+    update_telemetry_values();
+}
+
+// Function to process a complete JSON line
+void process_telemetry_line(const char* line) {
+    if (parse_telemetry(line, &latest_telemetry)) {
+        // Blink LED to indicate successful reception
+        gpio_put(LED_PIN, 1);
+
+        // Update LCD display
+        update_lcd_display();
+
+        // Also print to serial for debugging
+        printf("\n========== TELEMETRY RECEIVED ==========\n");
+        printf("Own Aircraft:\n");
+        printf("  Position: %.6f, %.6f\n", latest_telemetry.own.lat, latest_telemetry.own.lon);
+        printf("  Altitude: %.1f ft\n", latest_telemetry.own.alt);
+        printf("  Attitude: Pitch=%.2f Roll=%.2f Yaw=%.2f\n",
+               latest_telemetry.own.pitch,
+               latest_telemetry.own.roll,
+               latest_telemetry.own.yaw);
+
+        if (latest_telemetry.traffic_count > 0) {
+            printf("\nTraffic (%d aircraft):\n", latest_telemetry.traffic_count);
+            for (int i = 0; i < latest_telemetry.traffic_count; i++) {
+                TrafficData* t = &latest_telemetry.traffic[i];
+                printf("  [%s] %.6f, %.6f @ %.0f ft\n",
+                       t->id, t->lat, t->lon, t->alt);
+            }
+        }
+        printf("========================================\n");
+
+        gpio_put(LED_PIN, 0);
+    } else {
+        printf("ERROR: Failed to parse telemetry\n");
+    }
+}
+
+// Function to read serial data character by character
+void read_serial_data() {
+    int c = getchar_timeout_us(0); // Non-blocking read
+
+    if (c != PICO_ERROR_TIMEOUT) {
+        char ch = (char)c;
+
+        // Add character to buffer
+        if (ch == '\n' || ch == '\r') {
+            // End of line - process the complete JSON message
+            if (rx_index > 0) {
+                rx_buffer[rx_index] = '\0';
+                process_telemetry_line(rx_buffer);
+                rx_index = 0;
+            }
+        } else if (rx_index < BUFFER_SIZE - 1) {
+            rx_buffer[rx_index++] = ch;
+        } else {
+            // Buffer overflow - reset
+            printf("WARNING: Buffer overflow, resetting\n");
+            rx_index = 0;
+        }
+    }
+}
+
+int main() {
+    // Initialize LED pin
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
+
+    // Initialize USB serial (stdio)
+    stdio_init_all();
+
+    // Wait for USB connection
+    sleep_ms(2000);
+
+    printf("\n\n");
+    printf("=====================================\n");
+    printf("  Pico Telemetry Receiver v2.0\n");
+    printf("  With LCD Display Support\n");
+    printf("=====================================\n");
+    printf("Initializing LCD...\n");
+
+    // Initialize LCD
+    lcd_init();
+
+    // Display splash screen for 3 seconds
+    printf("Displaying splash screen...\n");
+    lcd_display_splash(splash_320x240_bin, splash_320x240_bin_len);
+
+    // Flash LED during splash
+    for (int i = 0; i < 3; i++) {
+        gpio_put(LED_PIN, 1);
+        sleep_ms(100);
+        gpio_put(LED_PIN, 0);
+        sleep_ms(100);
+    }
+
+    // Wait for 3 seconds total (minus the LED flash time)
+    sleep_ms(2400);
+
+    printf("LCD initialized\n");
+
+    // Initialize input handler
+    printf("Initializing input handler...\n");
+    input_init();
+    printf("Input handler ready\n");
+    printf("Waiting for telemetry data...\n\n");
+
+    // Input state
+    InputState input_state = {0};
+
+    // Main loop - continuously read and process serial data + inputs
+    while (true) {
+        read_serial_data();
+
+        // Read inputs and print events
+        input_read(&input_state);
+
+        if (input_just_pressed_up(&input_state)) {
+            printf(">>> INPUT: UP pressed\n");
+        }
+        if (input_just_pressed_down(&input_state)) {
+            printf(">>> INPUT: DOWN pressed\n");
+        }
+        if (input_just_pressed_left(&input_state)) {
+            printf(">>> INPUT: LEFT pressed\n");
+        }
+        if (input_just_pressed_right(&input_state)) {
+            printf(">>> INPUT: RIGHT pressed\n");
+        }
+        if (input_just_pressed_press(&input_state)) {
+            printf(">>> INPUT: PRESS (center) pressed\n");
+        }
+        if (input_just_pressed_key1(&input_state)) {
+            printf(">>> INPUT: KEY1 pressed\n");
+        }
+        if (input_just_pressed_key2(&input_state)) {
+            printf(">>> INPUT: KEY2 pressed\n");
+        }
+        if (input_just_pressed_key4(&input_state)) {
+            printf(">>> INPUT: KEY4 pressed\n");
+        }
+
+        sleep_ms(1); // Small delay to prevent CPU hogging
+    }
+
+    return 0;
+}
