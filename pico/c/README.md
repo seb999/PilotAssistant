@@ -2,10 +2,12 @@
 
 This directory contains C implementations for the Raspberry Pi Pico2 with ST7789 LCD display.
 
+**Note:** This implementation now uses the shared ST7789 driver from `common/st7789/` which is also used by the Raspberry Pi implementation for consistency and code reuse.
+
 ## Available Programs
 
-1. **pico_telemetry_receiver** - Receives and displays flight telemetry data
-2. **input_test** - Tests joystick and button inputs (NEW!)
+1. **menu_system** - Interactive menu with joystick navigation, radar display, and telemetry
+2. **input_test** - Tests joystick and button inputs
 
 ## Features
 
@@ -63,7 +65,7 @@ This directory contains C implementations for the Raspberry Pi Pico2 with ST7789
    ```
 
 3. The output files will be created in the `build/` directory:
-   - `pico_telemetry_receiver.uf2` - Telemetry receiver
+   - `menu_system.uf2` - Main menu system with radar
    - `input_test.uf2` - Input handler test program
 
 ## Flashing to Pico
@@ -183,9 +185,14 @@ sudo usermod -a -G dialout $USER
 
 ## Code Structure
 
-- **main.c** - Main program loop, USB serial handling, LED control
+- **main_menu.c** - Main menu system with radar display
+- **main_input_test.c** - Input testing program
+- **input_handler.c/h** - Joystick and button input with debouncing
+- **menu.c/h** - Menu navigation system
 - **telemetry_parser.c/h** - JSON parsing for telemetry data
+- **st7789_icons.c/h** - Pico-specific icon drawing functions
 - **CMakeLists.txt** - Build configuration
+- **../../common/st7789/** - Shared ST7789 LCD driver (used by both Pico and RPi)
 
 ## Data Format
 
