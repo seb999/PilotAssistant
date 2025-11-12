@@ -13,11 +13,11 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <errno.h>
-#include "st7789_rpi.h"
+#include "../include/st7789_rpi.h"
 
 // Serial configuration
 #define PICO_DEVICE "/dev/ttyACM0"
-#define BAUD_RATE   B115200
+#define BAUD_RATE B115200
 #define BUFFER_SIZE 256
 
 // Menu configuration
@@ -26,18 +26,17 @@
 #define MENU_START_Y 30
 
 // HUD colors (bright on black for projection)
-#define HUD_BG_COLOR       COLOR_BLACK
-#define HUD_TEXT_COLOR     COLOR_WHITE
+#define HUD_BG_COLOR COLOR_BLACK
+#define HUD_TEXT_COLOR COLOR_WHITE
 #define HUD_SELECTED_COLOR COLOR_CYAN
-#define HUD_TITLE_COLOR    COLOR_CYAN
+#define HUD_TITLE_COLOR COLOR_CYAN
 
 // Menu item labels (must match Pico order)
-static const char* menu_labels[] = {
+static const char *menu_labels[] = {
     "GO FLY",
     "BLUETOOTH",
     "GYRO OFFSET",
-    "RADAR"
-};
+    "RADAR"};
 
 // Global state
 static int serial_fd = -1;
@@ -46,25 +45,29 @@ static int current_selection = 0;
 static int menu_item_count = 4;
 
 // Signal handler for Ctrl+C
-void handle_sigint(int sig) {
+void handle_sigint(int sig)
+{
     (void)sig;
     running = false;
 }
 
 // Initialize serial port
-static int serial_init(const char* device) {
+static int serial_init(const char *device)
+{
     int fd;
     struct termios options;
 
     // Open serial port
     fd = open(device, O_RDWR | O_NOCTTY);
-    if (fd < 0) {
+    if (fd < 0)
+    {
         perror("Failed to open serial device");
         return -1;
     }
 
     // Get current options
-    if (tcgetattr(fd, &options) < 0) {
+    if (tcgetattr(fd, &options) < 0)
+    {
         perror("Failed to get serial attributes");
         close(fd);
         return -1;
@@ -92,7 +95,8 @@ static int serial_init(const char* device) {
     options.c_cc[VTIME] = 1;
 
     // Apply options
-    if (tcsetattr(fd, TCSANOW, &options) < 0) {
+    if (tcsetattr(fd, TCSANOW, &options) < 0)
+    {
         perror("Failed to set serial attributes");
         close(fd);
         return -1;
@@ -103,7 +107,8 @@ static int serial_init(const char* device) {
 }
 
 // Draw splash screen (HUD optimized)
-static void draw_splash(void) {
+static void draw_splash(void)
+{
     lcd_clear(HUD_BG_COLOR);
 
     // Large title
@@ -116,8 +121,10 @@ static void draw_splash(void) {
 }
 
 // Draw single menu item (HUD optimized - large, bright text)
-static void draw_menu_item(int index, bool selected) {
-    if (index < 0 || index >= menu_item_count) return;
+static void draw_menu_item(int index, bool selected)
+{
+    if (index < 0 || index >= menu_item_count)
+        return;
 
     uint16_t y = MENU_START_Y + (index * MENU_ITEM_HEIGHT);
     uint16_t color = selected ? HUD_SELECTED_COLOR : HUD_TEXT_COLOR;
@@ -130,18 +137,20 @@ static void draw_menu_item(int index, bool selected) {
     lcd_draw_string_scaled(20, y + 10, menu_labels[index], color, HUD_BG_COLOR, scale);
 
     // Draw selection indicator
-    if (selected) {
+    if (selected)
+    {
         // Arrow indicator
         lcd_draw_string_scaled(5, y + 10, ">", HUD_SELECTED_COLOR, HUD_BG_COLOR, scale);
 
         // Underline
         lcd_draw_line(20, y + MENU_ITEM_HEIGHT - 10,
-                     220, y + MENU_ITEM_HEIGHT - 10, HUD_SELECTED_COLOR);
+                      220, y + MENU_ITEM_HEIGHT - 10, HUD_SELECTED_COLOR);
     }
 }
 
 // Draw full menu
-static void draw_menu(void) {
+static void draw_menu(void)
+{
     lcd_clear(HUD_BG_COLOR);
 
     // Draw title bar
@@ -149,7 +158,8 @@ static void draw_menu(void) {
     lcd_draw_line(0, 25, LCD_WIDTH, 25, HUD_TITLE_COLOR);
 
     // Draw all menu items
-    for (int i = 0; i < menu_item_count; i++) {
+    for (int i = 0; i < menu_item_count; i++)
+    {
         draw_menu_item(i, i == current_selection);
     }
 
@@ -159,32 +169,42 @@ static void draw_menu(void) {
 }
 
 // Update menu selection
-static void update_selection(int old_selection, int new_selection) {
-    if (old_selection >= 0 && old_selection < menu_item_count) {
+static void update_selection(int old_selection, int new_selection)
+{
+    if (old_selection >= 0 && old_selection < menu_item_count)
+    {
         draw_menu_item(old_selection, false);
     }
-    if (new_selection >= 0 && new_selection < menu_item_count) {
+    if (new_selection >= 0 && new_selection < menu_item_count)
+    {
         draw_menu_item(new_selection, true);
     }
 }
 
 // Simple JSON parser (extract selected index)
-static bool parse_menu_message(const char* json, int* selected, int* total) {
+static bool parse_menu_message(const char *json, int *selected, int *total)
+{
     // Look for "selected":N pattern
-    const char* sel_ptr = strstr(json, "\"selected\":");
-    if (sel_ptr) {
+    const char *sel_ptr = strstr(json, "\"selected\":");
+    if (sel_ptr)
+    {
         sel_ptr += 11; // Skip "selected":
         *selected = atoi(sel_ptr);
-    } else {
+    }
+    else
+    {
         return false;
     }
 
     // Look for "total":N pattern
-    const char* total_ptr = strstr(json, "\"total\":");
-    if (total_ptr) {
+    const char *total_ptr = strstr(json, "\"total\":");
+    if (total_ptr)
+    {
         total_ptr += 8; // Skip "total":
         *total = atoi(total_ptr);
-    } else {
+    }
+    else
+    {
         *total = MENU_ITEMS_MAX;
     }
 
@@ -192,44 +212,59 @@ static bool parse_menu_message(const char* json, int* selected, int* total) {
 }
 
 // Check message type
-static const char* get_message_type(const char* json) {
-    const char* type_ptr = strstr(json, "\"type\":\"");
-    if (type_ptr) {
+static const char *get_message_type(const char *json)
+{
+    const char *type_ptr = strstr(json, "\"type\":\"");
+    if (type_ptr)
+    {
         type_ptr += 8; // Skip "type":"
-        if (strncmp(type_ptr, "splash", 6) == 0) return "splash";
-        if (strncmp(type_ptr, "menu", 4) == 0) return "menu";
-        if (strncmp(type_ptr, "action", 6) == 0) return "action";
+        if (strncmp(type_ptr, "splash", 6) == 0)
+            return "splash";
+        if (strncmp(type_ptr, "menu", 4) == 0)
+            return "menu";
+        if (strncmp(type_ptr, "action", 6) == 0)
+            return "action";
     }
     return NULL;
 }
 
 // Read and process serial messages
-static void process_serial_input(void) {
+static void process_serial_input(void)
+{
     static char buffer[BUFFER_SIZE];
     static int buf_pos = 0;
     char c;
 
-    while (read(serial_fd, &c, 1) > 0) {
-        if (c == '\n' || c == '\r') {
-            if (buf_pos > 0) {
+    while (read(serial_fd, &c, 1) > 0)
+    {
+        if (c == '\n' || c == '\r')
+        {
+            if (buf_pos > 0)
+            {
                 buffer[buf_pos] = '\0';
 
                 // Debug output
                 printf("Received: %s\n", buffer);
 
                 // Parse message
-                const char* msg_type = get_message_type(buffer);
+                const char *msg_type = get_message_type(buffer);
 
-                if (msg_type) {
-                    if (strcmp(msg_type, "splash") == 0) {
+                if (msg_type)
+                {
+                    if (strcmp(msg_type, "splash") == 0)
+                    {
                         draw_splash();
                     }
-                    else if (strcmp(msg_type, "menu") == 0) {
+                    else if (strcmp(msg_type, "menu") == 0)
+                    {
                         int selected = 0, total = MENU_ITEMS_MAX;
-                        if (parse_menu_message(buffer, &selected, &total)) {
+                        if (parse_menu_message(buffer, &selected, &total))
+                        {
                             // Clamp to valid range
-                            if (selected < 0) selected = 0;
-                            if (selected >= total) selected = total - 1;
+                            if (selected < 0)
+                                selected = 0;
+                            if (selected >= total)
+                                selected = total - 1;
 
                             int old_selection = current_selection;
                             current_selection = selected;
@@ -237,10 +272,13 @@ static void process_serial_input(void) {
 
                             // First menu message - draw full menu
                             static bool first_menu = true;
-                            if (first_menu) {
+                            if (first_menu)
+                            {
                                 draw_menu();
                                 first_menu = false;
-                            } else {
+                            }
+                            else
+                            {
                                 // Update only changed items
                                 update_selection(old_selection, current_selection);
                             }
@@ -248,13 +286,14 @@ static void process_serial_input(void) {
                             printf("Menu: %s selected\n", menu_labels[selected]);
                         }
                     }
-                    else if (strcmp(msg_type, "action") == 0) {
+                    else if (strcmp(msg_type, "action") == 0)
+                    {
                         // Action selected - could show confirmation or action screen
                         printf("Action: %s\n", menu_labels[current_selection]);
 
                         // Flash selection
                         lcd_fill_rect(0, MENU_START_Y + (current_selection * MENU_ITEM_HEIGHT),
-                                     LCD_WIDTH, MENU_ITEM_HEIGHT - 5, HUD_SELECTED_COLOR);
+                                      LCD_WIDTH, MENU_ITEM_HEIGHT - 5, HUD_SELECTED_COLOR);
                         usleep(100000);
                         draw_menu_item(current_selection, true);
                     }
@@ -262,16 +301,21 @@ static void process_serial_input(void) {
 
                 buf_pos = 0;
             }
-        } else if (buf_pos < BUFFER_SIZE - 1) {
+        }
+        else if (buf_pos < BUFFER_SIZE - 1)
+        {
             buffer[buf_pos++] = c;
-        } else {
+        }
+        else
+        {
             // Buffer overflow - reset
             buf_pos = 0;
         }
     }
 }
 
-int main(void) {
+int main(void)
+{
     printf("=== Pilot Assistant HUD Display ===\n");
     printf("Pico Device: %s\n", PICO_DEVICE);
     printf("Baud Rate: 115200\n");
@@ -282,7 +326,8 @@ int main(void) {
 
     // Initialize LCD
     printf("Initializing LCD (HUD mode)...\n");
-    if (lcd_init() < 0) {
+    if (lcd_init() < 0)
+    {
         fprintf(stderr, "Failed to initialize LCD\n");
         return 1;
     }
@@ -294,7 +339,8 @@ int main(void) {
     // Initialize serial connection to Pico
     printf("Connecting to Pico...\n");
     serial_fd = serial_init(PICO_DEVICE);
-    if (serial_fd < 0) {
+    if (serial_fd < 0)
+    {
         fprintf(stderr, "Failed to open serial connection to Pico\n");
         fprintf(stderr, "Make sure Pico is connected to USB\n");
         lcd_clear(HUD_BG_COLOR);
@@ -308,7 +354,8 @@ int main(void) {
 
     // Main loop
     printf("Waiting for menu data from Pico...\n");
-    while (running) {
+    while (running)
+    {
         process_serial_input();
         usleep(10000); // 10ms sleep to avoid CPU spinning
     }
@@ -319,7 +366,8 @@ int main(void) {
     lcd_draw_string(60, 110, "GOODBYE", HUD_TEXT_COLOR, HUD_BG_COLOR);
     sleep(1);
 
-    if (serial_fd >= 0) {
+    if (serial_fd >= 0)
+    {
         close(serial_fd);
     }
     lcd_cleanup();

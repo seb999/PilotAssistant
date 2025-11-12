@@ -1,8 +1,12 @@
+import sys
+import os
+# Add parent directory to path to find library module
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from library import ST7789
 from PIL import Image
 import time
 from picamera2 import Picamera2
-import cv2 
 
 # Initialize the display
 lcd = ST7789.ST7789()
@@ -12,6 +16,8 @@ lcd.bl_DutyCycle(50)
 
 # Initialize camera
 picam2 = Picamera2()
+config = picam2.create_preview_configuration(main={"size": (640, 480), "format": "RGB888"})
+picam2.configure(config)
 picam2.start()
 time.sleep(1)
 
@@ -19,12 +25,9 @@ time.sleep(1)
 try:
     while True:
         frame = picam2.capture_array()
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(frame).resize((240, 240)).convert("RGB").rotate(270)
-        # cv2.imshow("Original Camera Feed", frame)
-        # if cv2.waitKey(1) == ord('q'):
-        #     break
-
         lcd.ShowImage(img)
 except KeyboardInterrupt:
     print("Stopped.")
+    picam2.stop()
+    lcd.clear()

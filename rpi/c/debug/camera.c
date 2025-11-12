@@ -214,16 +214,24 @@ static int camera_capture_frame(void) {
     uint8_t *yuyv = (uint8_t *)buffers[buf.index].start;
 
     // Display frame on LCD (no rotation, direct display)
+    // YUYV format: Y0 U0 Y1 V0 (4 bytes = 2 pixels sharing U and V)
     for (int y = 0; y < CAPTURE_HEIGHT; y++) {
-        for (int x = 0; x < CAPTURE_WIDTH; x++) {
+        for (int x = 0; x < CAPTURE_WIDTH; x += 2) {
+            // Process pairs of pixels (YUYV = 4 bytes)
             int idx = (y * CAPTURE_WIDTH + x) * 2;
 
             uint8_t y0 = yuyv[idx];
-            uint8_t u = yuyv[idx + 1];
-            uint8_t v = yuyv[idx + 3];
+            uint8_t u  = yuyv[idx + 1];
+            uint8_t y1 = yuyv[idx + 2];
+            uint8_t v  = yuyv[idx + 3];
 
-            uint16_t rgb565 = yuv_to_rgb565(y0, u, v);
-            lcd_draw_pixel(x, y, rgb565);
+            // Convert both pixels
+            uint16_t rgb565_0 = yuv_to_rgb565(y0, u, v);
+            uint16_t rgb565_1 = yuv_to_rgb565(y1, u, v);
+
+            // Draw both pixels
+            lcd_draw_pixel(x, y, rgb565_0);
+            lcd_draw_pixel(x + 1, y, rgb565_1);
         }
     }
 

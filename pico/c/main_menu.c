@@ -23,6 +23,38 @@ static bool telemetry_received = false;
 static char rx_buffer[BUFFER_SIZE];
 static size_t rx_index = 0;
 
+// Track button release events for USB command sending
+typedef struct {
+    bool key1_was_pressed;
+    bool key2_was_pressed;
+    bool key4_was_pressed;
+    bool press_was_pressed;
+    bool up_was_pressed;
+    bool down_was_pressed;
+    bool left_was_pressed;
+    bool right_was_pressed;
+} ButtonReleaseTracker;
+
+static ButtonReleaseTracker release_tracker = {0};
+
+// Send button command over USB serial
+void send_button_command(uint8_t button_id, const char* action) {
+    printf("BTN:%d,%s\n", button_id, action);
+    fflush(stdout);
+}
+
+// Send joystick command over USB serial
+void send_joystick_command(const char* direction) {
+    printf("JOY:%s\n", direction);
+    fflush(stdout);
+}
+
+// Send high-level command over USB serial
+void send_high_level_command(const char* command) {
+    printf("CMD:%s\n", command);
+    fflush(stdout);
+}
+
 // Function to draw status icons at the top
 void draw_status_icons(void) {
     // Icons are 24x24, positioned at top right with 4px spacing
@@ -277,6 +309,89 @@ int main() {
     while (true) {
         // Read inputs
         input_read(&input_state);
+
+        // --- Send Button Press Commands to Raspberry Pi ---
+        if (input_just_pressed_key1(&input_state)) {
+            send_button_command(1, "PRESS");
+            send_high_level_command("FLY_MODE");
+            release_tracker.key1_was_pressed = true;
+        }
+
+        if (input_just_pressed_key2(&input_state)) {
+            send_button_command(2, "PRESS");
+            send_high_level_command("GYRO_CALIBRATION");
+            release_tracker.key2_was_pressed = true;
+        }
+
+        if (input_just_pressed_key4(&input_state)) {
+            send_button_command(4, "PRESS");
+            send_high_level_command("BLUETOOTH");
+            release_tracker.key4_was_pressed = true;
+        }
+
+        if (input_just_pressed_press(&input_state)) {
+            send_button_command(5, "PRESS");
+            release_tracker.press_was_pressed = true;
+        }
+
+        // --- Send Button Release Commands ---
+        if (release_tracker.key1_was_pressed && !input_state.key1) {
+            send_button_command(1, "RELEASE");
+            release_tracker.key1_was_pressed = false;
+        }
+
+        if (release_tracker.key2_was_pressed && !input_state.key2) {
+            send_button_command(2, "RELEASE");
+            release_tracker.key2_was_pressed = false;
+        }
+
+        if (release_tracker.key4_was_pressed && !input_state.key4) {
+            send_button_command(4, "RELEASE");
+            release_tracker.key4_was_pressed = false;
+        }
+
+        if (release_tracker.press_was_pressed && !input_state.press) {
+            send_button_command(5, "RELEASE");
+            release_tracker.press_was_pressed = false;
+        }
+
+        // --- Send Joystick Commands ---
+        if (input_just_pressed_up(&input_state)) {
+            send_joystick_command("UP");
+            release_tracker.up_was_pressed = true;
+        }
+
+        if (input_just_pressed_down(&input_state)) {
+            send_joystick_command("DOWN");
+            release_tracker.down_was_pressed = true;
+        }
+
+        if (input_just_pressed_left(&input_state)) {
+            send_joystick_command("LEFT");
+            release_tracker.left_was_pressed = true;
+        }
+
+        if (input_just_pressed_right(&input_state)) {
+            send_joystick_command("RIGHT");
+            release_tracker.right_was_pressed = true;
+        }
+
+        // --- Joystick Release (optional, for future use) ---
+        if (release_tracker.up_was_pressed && !input_state.up) {
+            release_tracker.up_was_pressed = false;
+        }
+
+        if (release_tracker.down_was_pressed && !input_state.down) {
+            release_tracker.down_was_pressed = false;
+        }
+
+        if (release_tracker.left_was_pressed && !input_state.left) {
+            release_tracker.left_was_pressed = false;
+        }
+
+        if (release_tracker.right_was_pressed && !input_state.right) {
+            release_tracker.right_was_pressed = false;
+        }
 
         // Handle menu navigation
         if (menu_handle_input(&menu, &input_state)) {

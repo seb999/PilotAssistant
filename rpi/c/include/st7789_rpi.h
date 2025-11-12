@@ -1,6 +1,6 @@
 /**
  * ST7789 LCD Driver for Raspberry Pi
- * 240x240 display via SPI
+ * 320x240 display via SPI (landscape mode for HUD)
  */
 
 #ifndef ST7789_RPI_H
@@ -9,8 +9,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Display dimensions
-#define LCD_WIDTH  240
+// Display dimensions (landscape mode)
+#define LCD_WIDTH  320
 #define LCD_HEIGHT 240
 
 // RGB565 color definitions
@@ -72,5 +72,16 @@ void lcd_draw_string(uint16_t x, uint16_t y, const char* str, uint16_t color, ui
  * Draw a scaled string
  */
 void lcd_draw_string_scaled(uint16_t x, uint16_t y, const char* str, uint16_t color, uint16_t bg_color, uint8_t scale);
+
+/**
+ * Draw an RGB565 image buffer
+ */
+void lcd_draw_image(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t* image_data);
+
+/**
+ * Load and display a PNG image from file
+ * Returns 0 on success, -1 on error
+ */
+int lcd_display_png(const char* filename);
 
 #endif // ST7789_RPI_H

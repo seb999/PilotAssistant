@@ -1,6 +1,6 @@
 /*
  * ST7789 LCD Test Program for Raspberry Pi
- * Tests the 240x240 ST7789 LCD display
+ * Tests the 320x240 ST7789 LCD display in landscape mode (HUD projection)
  */
 
 #include <stdio.h>
@@ -8,19 +8,20 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <unistd.h>
-#include "st7789_rpi.h"
-
+#include "../include/st7789_rpi.h"
 // Global flag for clean exit
 static volatile bool running = true;
 
 // Signal handler for Ctrl+C
-void handle_sigint(int sig) {
+void handle_sigint(int sig)
+{
     (void)sig;
     running = false;
 }
 
-int main(void) {
-    printf("=== ST7789 LCD Test (240x240) ===\n");
+int main(void)
+{
+    printf("=== ST7789 LCD Test (320x240) ===\n");
     printf("Press Ctrl+C to exit\n\n");
 
     // Set up signal handler
@@ -28,11 +29,24 @@ int main(void) {
 
     // Initialize display
     printf("Initializing LCD...\n");
-    if (lcd_init() < 0) {
+    if (lcd_init() < 0)
+    {
         fprintf(stderr, "Failed to initialize LCD\n");
         return 1;
     }
     printf("✓ LCD initialized\n\n");
+
+    // Display splash screen
+    printf("Loading splash screen...\n");
+    if (lcd_display_png("../images/output.png") == 0)
+    {
+        printf("✓ Splash screen displayed\n");
+        sleep(3);
+    }
+    else
+    {
+        printf("⚠ Could not load splash screen, continuing...\n");
+    }
 
     // Test 1: Color fill
     printf("Test 1: Filling screen with colors...\n");
@@ -49,7 +63,7 @@ int main(void) {
     printf("Test 2: Drawing text...\n");
     lcd_clear(COLOR_BLACK);
     lcd_draw_string(10, 10, "ST7789 LCD", COLOR_CYAN, COLOR_BLACK);
-    lcd_draw_string(10, 30, "240x240", COLOR_WHITE, COLOR_BLACK);
+    lcd_draw_string(10, 30, "320x240", COLOR_WHITE, COLOR_BLACK);
     lcd_draw_string(10, 50, "Raspberry Pi", COLOR_GREEN, COLOR_BLACK);
 
     lcd_draw_string_scaled(10, 80, "SCALED", COLOR_YELLOW, COLOR_BLACK, 2);
@@ -67,9 +81,9 @@ int main(void) {
     lcd_fill_rect(130, 10, 50, 30, COLOR_BLUE);
 
     // Draw lines
-    lcd_draw_line(10, 60, 230, 60, COLOR_WHITE);
-    lcd_draw_line(10, 80, 230, 150, COLOR_CYAN);
-    lcd_draw_line(230, 80, 10, 150, COLOR_MAGENTA);
+    lcd_draw_line(10, 60, 310, 60, COLOR_WHITE);
+    lcd_draw_line(10, 80, 310, 150, COLOR_CYAN);
+    lcd_draw_line(310, 80, 10, 150, COLOR_MAGENTA);
 
     // Draw circles
     lcd_draw_circle(120, 180, 20, COLOR_YELLOW);
