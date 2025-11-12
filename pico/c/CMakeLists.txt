@@ -50,3 +50,21 @@ target_link_libraries(menu_system
 pico_enable_stdio_usb(menu_system 1)
 pico_enable_stdio_uart(menu_system 0)
 pico_add_extra_outputs(menu_system)
+
+# Command sender executable (sends button/joystick commands to Raspberry Pi)
+add_executable(command_sender
+    main_command_sender.c
+    input_handler.c
+    st7789_lcd.c
+)
+
+target_link_libraries(command_sender
+    pico_stdlib
+    hardware_gpio
+    hardware_spi
+    hardware_adc
+)
+
+pico_enable_stdio_usb(command_sender 1)
+pico_enable_stdio_uart(command_sender 0)
+pico_add_extra_outputs(command_sender)
