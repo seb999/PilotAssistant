@@ -128,7 +128,7 @@ int main(void) {
     // Main loop
     while (running) {
         if (adxl345_read_axes(file, &x, &y, &z) == 0) {
-            printf("X: %6.2f g, Y: %6.2f g, Z: %6.2f g\r", x, y, z);
+            printf("X: %6.2f g, Y: %6.2f g, Z: %6.2f g\n", x, y, z);
             fflush(stdout);
         }
         usleep(100000); // 100ms delay

@@ -36,6 +36,8 @@ cp pico_telemetry_receiver.uf2 /Volumes/RP2350/
 
 ### Testing
 
+#### Simulator Tools
+
 ```bash
 # Send telemetry to Pico
 python3 Simulator/send_telemetry.py
@@ -43,6 +45,34 @@ python3 Simulator/send_telemetry.py
 # Monitor Pico output
 python3 Simulator/monitor_serial.py
 ```
+
+#### Hardware Testing (Raspberry Pi C)
+
+Test individual hardware components:
+
+```bash
+cd rpi/c/debug
+
+# Test GPS module
+gcc gps.c -o gps && ./gps
+
+# Test ADXL345 accelerometer
+gcc adxl345.c -o adxl345 && ./adxl345
+
+# Test ST7789 LCD display
+gcc lcd.c -o lcd && ./lcd
+
+# Test camera (libcamera C++ version)
+g++ camera_libcamera.cpp -o camera_libcamera $(pkg-config --cflags --libs libcamera) && ./camera_libcamera
+
+# Test camera to LCD integration
+gcc cam_to_lcd.c -o cam_to_lcd && ./cam_to_lcd
+
+# Test Pico2 command receiver (monitor button/joystick commands from Pico)
+gcc pico_commands.c -o pico_commands && ./pico_commands
+```
+
+All test programs exit with Ctrl+C.
 
 ## Project Structure
 

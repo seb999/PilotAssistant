@@ -22,7 +22,7 @@ using namespace std::chrono_literals;
 // Configuration
 #define CAPTURE_WIDTH  640
 #define CAPTURE_HEIGHT 480
-#define LCD_DISPLAY_WIDTH  240
+#define LCD_DISPLAY_WIDTH  320
 #define LCD_DISPLAY_HEIGHT 240
 
 // Global variables
@@ -39,61 +39,95 @@ void handle_sigint(int sig) {
     running = false;
 }
 
-// Convert RGB888 to RGB565
-static inline uint16_t rgb888_to_rgb565(uint8_t r, uint8_t g, uint8_t b) {
+// Convert YUV to RGB565
+static inline uint16_t yuv_to_rgb565(uint8_t y, uint8_t u, uint8_t v) {
+    int r, g, b;
+
+    // YUV to RGB conversion
+    int c = y - 16;
+    int d = u - 128;
+    int e = v - 128;
+
+    r = (298 * c + 409 * e + 128) >> 8;
+    g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+    b = (298 * c + 516 * d + 128) >> 8;
+
+    // Clamp to 0-255
+    r = r < 0 ? 0 : (r > 255 ? 255 : r);
+    g = g < 0 ? 0 : (g > 255 ? 255 : g);
+    b = b < 0 ? 0 : (b > 255 ? 255 : b);
+
+    // Convert to RGB565
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
-// Downsample and display frame (optimized)
+// Downsample and display frame (YUV420 format) - optimized with buffer
 void display_frame_fast(const uint8_t* data, unsigned int width, unsigned int height) {
-    // Use buffer to batch pixel updates
+    // YUV420 planar: Y plane (full size), U plane (1/4 size), V plane (1/4 size)
+    // Try swapping U and V for correct colors
+    const uint8_t *y_plane = data;
+    const uint8_t *v_plane = data + (width * height);  // Swapped V first
+    const uint8_t *u_plane = v_plane + (width * height / 4);  // Then U
+
     const int x_step = width / LCD_DISPLAY_WIDTH;
     const int y_step = height / LCD_DISPLAY_HEIGHT;
 
+    // Allocate RGB565 buffer for the entire LCD frame
+    static uint16_t *rgb_buffer = nullptr;
+    if (!rgb_buffer) {
+        rgb_buffer = new uint16_t[LCD_DISPLAY_WIDTH * LCD_DISPLAY_HEIGHT];
+    }
+
+    // Convert YUV to RGB565 in buffer
     for (int lcd_y = 0; lcd_y < LCD_DISPLAY_HEIGHT; lcd_y++) {
         for (int lcd_x = 0; lcd_x < LCD_DISPLAY_WIDTH; lcd_x++) {
             int src_x = lcd_x * x_step;
             int src_y = lcd_y * y_step;
-            int src_idx = (src_y * width + src_x) * 3;  // RGB888
 
-            uint8_t r = data[src_idx];
-            uint8_t g = data[src_idx + 1];
-            uint8_t b = data[src_idx + 2];
+            // Get Y value (no stride, direct indexing)
+            uint8_t y_val = y_plane[src_y * width + src_x];
 
-            uint16_t rgb565 = rgb888_to_rgb565(r, g, b);
-            lcd_draw_pixel(lcd_x, lcd_y, rgb565);
+            // Get U and V values (subsampled 2x2)
+            int uv_x = src_x / 2;
+            int uv_y = src_y / 2;
+            int uv_idx = uv_y * (width / 2) + uv_x;
+            uint8_t u_val = u_plane[uv_idx];
+            uint8_t v_val = v_plane[uv_idx];
+
+            rgb_buffer[lcd_y * LCD_DISPLAY_WIDTH + lcd_x] = yuv_to_rgb565(y_val, u_val, v_val);
         }
     }
+
+    // Batch write to LCD - much faster than pixel-by-pixel
+    lcd_draw_image(0, 0, LCD_DISPLAY_WIDTH, LCD_DISPLAY_HEIGHT, rgb_buffer);
 }
 
-// Request completed handler
-class CameraHandler : public Object {
-public:
-    void requestComplete(Request *request) {
-        if (request->status() == Request::RequestCancelled)
-            return;
+// Request completed handler function
+void requestComplete(Request *request) {
+    if (request->status() == Request::RequestCancelled)
+        return;
 
-        const Request::BufferMap &buffers = request->buffers();
-        for (auto bufferPair : buffers) {
-            FrameBuffer *buffer = bufferPair.second;
-            const FrameBuffer::Plane &plane = buffer->planes()[0];
+    const Request::BufferMap &buffers = request->buffers();
+    for (auto bufferPair : buffers) {
+        FrameBuffer *buffer = bufferPair.second;
 
-            // Map the buffer
-            void *mem = mmap(NULL, plane.length, PROT_READ, MAP_SHARED, plane.fd.get(), 0);
-            if (mem != MAP_FAILED) {
-                display_frame_fast((uint8_t*)mem, CAPTURE_WIDTH, CAPTURE_HEIGHT);
-                munmap(mem, plane.length);
-                frame_count++;
-            }
-        }
+        // YUV420 - use first plane which contains all data
+        const FrameBuffer::Plane &plane = buffer->planes()[0];
+        void *mem = mmap(NULL, plane.length, PROT_READ, MAP_SHARED, plane.fd.get(), 0);
 
-        // Requeue the request
-        if (running) {
-            request->reuse(Request::ReuseBuffers);
-            camera->queueRequest(request);
+        if (mem != MAP_FAILED) {
+            display_frame_fast((uint8_t*)mem, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+            munmap(mem, plane.length);
+            frame_count++;
         }
     }
-};
+
+    // Requeue the request
+    if (running) {
+        request->reuse(Request::ReuseBuffers);
+        camera->queueRequest(request);
+    }
+}
 
 int main() {
     std::cout << "=== Camera Stream to LCD (libcamera) ===" << std::endl;
@@ -170,7 +204,8 @@ int main() {
     StreamConfiguration &streamConfig = config->at(0);
     streamConfig.size.width = CAPTURE_WIDTH;
     streamConfig.size.height = CAPTURE_HEIGHT;
-    streamConfig.pixelFormat = PixelFormat::fromString("RGB888");
+    // Use YUV420 which is better supported for streaming
+    streamConfig.pixelFormat = PixelFormat::fromString("YUV420");
 
     config->validate();
     std::cout << "Camera configuration: " << streamConfig.toString() << std::endl;
@@ -201,8 +236,8 @@ int main() {
 
     std::cout << "Allocated " << allocator->buffers(stream).size() << " buffers" << std::endl;
 
-    // Create handler
-    CameraHandler handler;
+    // Connect signal to our callback function
+    camera->requestCompleted.connect(requestComplete);
 
     // Create requests
     for (const std::unique_ptr<FrameBuffer> &buffer : allocator->buffers(stream)) {
@@ -229,9 +264,6 @@ int main() {
 
         requests.push_back(std::move(request));
     }
-
-    // Connect signal
-    camera->requestCompleted.connect(&handler, &CameraHandler::requestComplete);
 
     // Start camera
     std::cout << "Starting camera..." << std::endl;
@@ -265,15 +297,15 @@ int main() {
     auto start_time = std::chrono::steady_clock::now();
     int last_frame_count = 0;
 
-    // Main loop
+    // Main loop - just monitor FPS, callbacks run in libcamera threads
     while (running) {
-        std::this_thread::sleep_for(1s);
+        std::this_thread::sleep_for(100ms);
 
         auto current_time = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count() / 1000.0;
 
-        if (elapsed >= 1) {
-            float fps = (frame_count - last_frame_count) / (float)elapsed;
+        if (elapsed >= 1.0) {
+            float fps = (frame_count - last_frame_count) / elapsed;
             std::cout << "FPS: " << std::fixed << std::setprecision(1) << fps << "\r" << std::flush;
             last_frame_count = frame_count;
             start_time = current_time;

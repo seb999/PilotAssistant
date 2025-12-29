@@ -84,4 +84,41 @@ void lcd_draw_image(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16
  */
 int lcd_display_png(const char* filename);
 
+/**
+ * Get pointer to the framebuffer
+ * Allows drawing to offscreen buffer for double buffering
+ */
+uint16_t* lcd_get_framebuffer(void);
+
+/**
+ * Display the current framebuffer to the screen
+ * Call this after drawing to framebuffer to show changes
+ */
+void lcd_display_framebuffer(void);
+
+/**
+ * Clear the framebuffer with a color (doesn't update display)
+ */
+void lcd_fb_clear(uint16_t color);
+
+/**
+ * Draw pixel to framebuffer
+ */
+void lcd_fb_draw_pixel(uint16_t x, uint16_t y, uint16_t color);
+
+/**
+ * Fill rectangle in framebuffer
+ */
+void lcd_fb_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color);
+
+/**
+ * Draw line in framebuffer
+ */
+void lcd_fb_draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color);
+
+/**
+ * Draw string in framebuffer
+ */
+void lcd_fb_draw_string(uint16_t x, uint16_t y, const char* str, uint16_t color, uint16_t bg_color);
+
 #endif // ST7789_RPI_H

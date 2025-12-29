@@ -4,8 +4,8 @@
  */
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-#include "st7789_rpi.h"
+#include "../include/stb_image.h"
+#include "../include/st7789_rpi.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +34,9 @@ static struct gpiod_chip *chip = NULL;
 static struct gpiod_line *dc_line = NULL;
 static struct gpiod_line *rst_line = NULL;
 static struct gpiod_line *bl_line = NULL;
+
+// Framebuffer for double buffering
+static uint16_t *framebuffer = NULL;
 
 // Simple 5x7 font
 static const uint8_t font_5x7[][5] = {
@@ -266,10 +269,27 @@ int lcd_init(void) {
     // Turn on backlight
     gpio_set(bl_line, 1);
 
+    // Allocate framebuffer (RGB565 = 2 bytes per pixel)
+    framebuffer = (uint16_t*)malloc(LCD_WIDTH * LCD_HEIGHT * sizeof(uint16_t));
+    if (!framebuffer) {
+        fprintf(stderr, "Failed to allocate framebuffer\n");
+        lcd_cleanup();
+        return -1;
+    }
+
+    // Clear framebuffer to black
+    memset(framebuffer, 0, LCD_WIDTH * LCD_HEIGHT * sizeof(uint16_t));
+
     return 0;
 }
 
 void lcd_cleanup(void) {
+    // Free framebuffer
+    if (framebuffer) {
+        free(framebuffer);
+        framebuffer = NULL;
+    }
+
     if (bl_line) {
         gpio_set(bl_line, 0);
         gpiod_line_release(bl_line);
@@ -510,4 +530,103 @@ int lcd_display_png(const char* filename) {
     stbi_image_free(img);
 
     return 0;
+}
+
+// ============================================================================
+// FRAMEBUFFER FUNCTIONS (Double Buffering)
+// ============================================================================
+
+uint16_t* lcd_get_framebuffer(void) {
+    return framebuffer;
+}
+
+void lcd_display_framebuffer(void) {
+    if (!framebuffer) return;
+
+    // Use existing lcd_draw_image function which handles chunked transfers
+    lcd_draw_image(0, 0, LCD_WIDTH, LCD_HEIGHT, framebuffer);
+}
+
+void lcd_fb_clear(uint16_t color) {
+    if (!framebuffer) return;
+    for (int i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) {
+        framebuffer[i] = color;
+    }
+}
+
+void lcd_fb_draw_pixel(uint16_t x, uint16_t y, uint16_t color) {
+    if (!framebuffer || x >= LCD_WIDTH || y >= LCD_HEIGHT) return;
+    framebuffer[y * LCD_WIDTH + x] = color;
+}
+
+void lcd_fb_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) {
+    if (!framebuffer) return;
+
+    for (uint16_t dy = 0; dy < h; dy++) {
+        uint16_t ypos = y + dy;
+        if (ypos >= LCD_HEIGHT) break;
+
+        for (uint16_t dx = 0; dx < w; dx++) {
+            uint16_t xpos = x + dx;
+            if (xpos >= LCD_WIDTH) break;
+
+            framebuffer[ypos * LCD_WIDTH + xpos] = color;
+        }
+    }
+}
+
+void lcd_fb_draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color) {
+    if (!framebuffer) return;
+
+    // Bresenham's line algorithm
+    int dx = abs(x1 - x0);
+    int dy = abs(y1 - y0);
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = dx - dy;
+
+    while (1) {
+        lcd_fb_draw_pixel(x0, y0, color);
+
+        if (x0 == x1 && y0 == y1) break;
+
+        int e2 = 2 * err;
+        if (e2 > -dy) {
+            err -= dy;
+            x0 += sx;
+        }
+        if (e2 < dx) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+void lcd_fb_draw_string(uint16_t x, uint16_t y, const char* str, uint16_t color, uint16_t bg_color) {
+    if (!framebuffer || !str) return;
+
+    while (*str) {
+        // Draw character background
+        for (int dy = 0; dy < 8; dy++) {
+            for (int dx = 0; dx < 6; dx++) {
+                lcd_fb_draw_pixel(x + dx, y + dy, bg_color);
+            }
+        }
+
+        // Draw character
+        if (*str >= 32 && *str <= 'Z') {
+            const uint8_t *glyph = font_5x7[*str - 32];
+            for (int col = 0; col < 5; col++) {
+                uint8_t line = glyph[col];
+                for (int row = 0; row < 7; row++) {
+                    if (line & (1 << row)) {
+                        lcd_fb_draw_pixel(x + col, y + row, color);
+                    }
+                }
+            }
+        }
+
+        x += 6;
+        str++;
+    }
 }
