@@ -9,7 +9,8 @@ static const MenuRect default_positions[] = {
     {5, 32, 310, 35},   // Go Fly
     {5, 72, 310, 35},   // Bluetooth
     {5, 112, 310, 35},  // Gyro Offset
-    {5, 152, 310, 35}   // Radar
+    {5, 152, 310, 35},  // Radar
+    {5, 192, 310, 35}   // Test Gyro
 };
 
 void menu_init(MenuState* menu, MenuItem* items, int count, MenuRect* positions) {
@@ -80,6 +81,7 @@ void menu_draw_full(MenuState* menu) {
     }
 
     menu->last_selection_index = menu->selection_index;
+    lcd_flush();
 }
 
 // Update selection (partial redraw)
@@ -100,6 +102,7 @@ void menu_update_selection(MenuState* menu) {
     }
 
     menu->last_selection_index = menu->selection_index;
+    lcd_flush();
 }
 
 // Handle input navigation

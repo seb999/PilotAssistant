@@ -19,6 +19,8 @@
 #define COLOR_CYAN    0x07FF
 #define COLOR_MAGENTA 0xF81F
 #define COLOR_AMBER   0xFD20  // Orange/Amber color (RGB565)
+#define COLOR_BROWN   0x8200  // Brown for ground (RGB565)
+#define COLOR_SKY     0x039F  // Sky blue (RGB565)
 
 // Pin definitions for Waveshare 1.3" LCD
 #define LCD_DC_PIN   8
@@ -49,8 +51,14 @@ void lcd_draw_char(uint16_t x, uint16_t y, char ch, uint16_t color, uint16_t bg_
 // Draw a single character scaled
 void lcd_draw_char_scaled(uint16_t x, uint16_t y, char ch, uint16_t color, uint16_t bg_color, uint8_t scale);
 
-// Update the display
-void lcd_update(void);
+// Flush framebuffer to LCD (call after all drawing is done)
+void lcd_flush(void);
+
+// Flush a rectangular region of framebuffer to LCD
+void lcd_flush_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+
+// Get pointer to framebuffer (320*240 uint16_t pixels)
+uint16_t* lcd_get_framebuffer(void);
 
 // Display a splash screen from RGB565 buffer
 void lcd_display_splash(const uint8_t* image_data, size_t data_len);
@@ -68,6 +76,6 @@ void lcd_draw_bitmap_transparent(uint16_t x, uint16_t y, uint16_t width, uint16_
 // Radar display functions
 void lcd_draw_circle(uint16_t x0, uint16_t y0, uint16_t radius, uint16_t color);
 void lcd_draw_pixel(uint16_t x, uint16_t y, uint16_t color);
-void lcd_draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color);
+void lcd_draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color);
 
 #endif // ST7789_LCD_H

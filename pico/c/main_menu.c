@@ -13,6 +13,8 @@
 #include "input_handler.h"
 #include "menu.h"
 #include "telemetry_parser.h"
+#include "icm20948_sensor.h"
+#include "madgwick_filter.h"
 
 #define LED_PIN 25
 #define BUFFER_SIZE 1024
@@ -101,6 +103,7 @@ static void draw_ribbon_internal(void) {
     lcd_draw_wifi_icon(240, 2, current_state.wifi_ok);
     lcd_draw_gps_icon(268, 2, current_state.gps_ok);
     lcd_draw_bluetooth_icon(296, 2, current_state.bt_ok);
+    lcd_flush_rect(0, 0, 320, 28);
 }
 
 // Force draw ribbon (always draw, ignore state check)
@@ -172,6 +175,7 @@ void action_go_fly(void) {
     lcd_clear(COLOR_BLACK);
     lcd_draw_string(80, 100, "GO FLY", COLOR_YELLOW, COLOR_BLACK);
     lcd_draw_string(60, 120, "Coming Soon", COLOR_WHITE, COLOR_BLACK);
+    lcd_flush();
     sleep_ms(2000);
 }
 
@@ -180,6 +184,7 @@ void action_bluetooth(void) {
     lcd_clear(COLOR_BLACK);
     lcd_draw_string(70, 100, "BLUETOOTH", COLOR_YELLOW, COLOR_BLACK);
     lcd_draw_string(60, 120, "Coming Soon", COLOR_WHITE, COLOR_BLACK);
+    lcd_flush();
     sleep_ms(2000);
 }
 
@@ -213,6 +218,7 @@ void action_gyro_offset(void) {
 
     snprintf(buf, sizeof(buf), "ROLL:  %+d", roll_offset);
     lcd_draw_string_scaled(50, 155, buf, COLOR_YELLOW, COLOR_BLACK, 3);
+    lcd_flush();
 
     // Offset adjustment loop
     while (true) {
@@ -231,6 +237,7 @@ void action_gyro_offset(void) {
             // Redraw only the pitch value
             snprintf(buf, sizeof(buf), "PITCH: %+d", pitch_offset);
             lcd_draw_string_scaled(50, 120, buf, COLOR_YELLOW, COLOR_BLACK, 3);
+            lcd_flush_rect(50, 120, 220, 24);
 
             printf("Pitch offset: %+d\n", pitch_offset);
         }
@@ -241,29 +248,25 @@ void action_gyro_offset(void) {
             snprintf(cmd, sizeof(cmd), "OFFSET:PITCH:%d", pitch_offset);
             send_high_level_command(cmd);
 
-            // Clear only the pitch value area
             lcd_fill_rect(50, 120, 220, 24, COLOR_BLACK);
-
-            // Redraw only the pitch value
             snprintf(buf, sizeof(buf), "PITCH: %+d", pitch_offset);
             lcd_draw_string_scaled(50, 120, buf, COLOR_YELLOW, COLOR_BLACK, 3);
+            lcd_flush_rect(50, 120, 220, 24);
 
             printf("Pitch offset: %+d\n", pitch_offset);
         }
 
-        // Adjust roll offset with LEFT/RIGHT - only update the value area
+        // Adjust roll offset with LEFT/RIGHT
         if (input_just_pressed_left(&input_state)) {
             roll_offset--;
             char cmd[32];
             snprintf(cmd, sizeof(cmd), "OFFSET:ROLL:%d", roll_offset);
             send_high_level_command(cmd);
 
-            // Clear only the roll value area
             lcd_fill_rect(50, 155, 220, 24, COLOR_BLACK);
-
-            // Redraw only the roll value
             snprintf(buf, sizeof(buf), "ROLL:  %+d", roll_offset);
             lcd_draw_string_scaled(50, 155, buf, COLOR_YELLOW, COLOR_BLACK, 3);
+            lcd_flush_rect(50, 155, 220, 24);
 
             printf("Roll offset: %+d\n", roll_offset);
         }
@@ -274,12 +277,10 @@ void action_gyro_offset(void) {
             snprintf(cmd, sizeof(cmd), "OFFSET:ROLL:%d", roll_offset);
             send_high_level_command(cmd);
 
-            // Clear only the roll value area
             lcd_fill_rect(50, 155, 220, 24, COLOR_BLACK);
-
-            // Redraw only the roll value
             snprintf(buf, sizeof(buf), "ROLL:  %+d", roll_offset);
             lcd_draw_string_scaled(50, 155, buf, COLOR_YELLOW, COLOR_BLACK, 3);
+            lcd_flush_rect(50, 155, 220, 24);
 
             printf("Roll offset: %+d\n", roll_offset);
         }
@@ -334,6 +335,7 @@ void draw_radar_static(void) {
 
     // Draw status icons at top right
     draw_status_icons();
+    lcd_flush();
 }
 
 // Clear previous aircraft positions
@@ -388,6 +390,7 @@ void update_radar_aircraft(void) {
     snprintf(buf, sizeof(buf), "TRAFFIC: %d", latest_telemetry.traffic_count);
     lcd_fill_rect(5, 220, 150, 10, COLOR_BLACK);  // Clear old count
     lcd_draw_string(5, 220, buf, COLOR_WHITE, COLOR_BLACK);
+    lcd_flush();
 }
 
 void action_radar(void) {
@@ -426,12 +429,224 @@ void action_radar(void) {
     }
 }
 
+void action_test_gyro(void) {
+    printf("=== AHRS ATTITUDE INDICATOR selected ===\n");
+
+    // Initialize ICM20948
+    if (!icm20948_init()) {
+        lcd_clear(COLOR_BLACK);
+        lcd_draw_string_scaled(20, 60, "SENSOR ERROR", COLOR_RED, COLOR_BLACK, 3);
+        lcd_draw_string(20, 110, "WHO_AM_I check failed", COLOR_WHITE, COLOR_BLACK);
+        lcd_draw_string(20, 125, "Expected: 0xEA", COLOR_CYAN, COLOR_BLACK);
+        lcd_draw_string(20, 145, "Check connections:", COLOR_WHITE, COLOR_BLACK);
+        lcd_draw_string(20, 160, "CS:GPIO17 SCK:GPIO18", COLOR_CYAN, COLOR_BLACK);
+        lcd_draw_string(20, 175, "MOSI:GPIO19 MISO:GPIO20", COLOR_CYAN, COLOR_BLACK);
+        lcd_draw_string(20, 200, "KEY2: Back", COLOR_WHITE, COLOR_BLACK);
+        lcd_flush();
+
+        InputState input_state = {0};
+        while (true) {
+            input_read(&input_state);
+            if (input_just_pressed_key2(&input_state)) break;
+            sleep_ms(50);
+        }
+        return;
+    }
+
+    // Madgwick IMU-only filter (6DOF)
+    MadgwickFilter filter;
+    madgwick_init(&filter, 100.0f, 0.10f);
+
+    InputState input_state = {0};
+    SensorData accel, gyro;
+
+    // Sensor bias calibration - measure bias while stationary
+    printf("Calibrating sensors (keep sensor still)...\n");
+    float gyro_bias_x = 0, gyro_bias_y = 0, gyro_bias_z = 0;
+    float accel_bias_x = 0, accel_bias_y = 0, accel_bias_z = 0;
+    int calibration_samples = 100;
+
+    for (int i = 0; i < calibration_samples; i++) {
+        if (icm20948_read_gyro(&gyro)) {
+            gyro_bias_x += icm20948_gyro_to_dps(gyro.x, GYRO_RANGE_500DPS);
+            gyro_bias_y += icm20948_gyro_to_dps(gyro.y, GYRO_RANGE_500DPS);
+            gyro_bias_z += icm20948_gyro_to_dps(gyro.z, GYRO_RANGE_500DPS);
+        }
+        if (icm20948_read_accel(&accel)) {
+            accel_bias_x += icm20948_accel_to_g(accel.x, ACCEL_RANGE_4G);
+            accel_bias_y += icm20948_accel_to_g(accel.y, ACCEL_RANGE_4G);
+            accel_bias_z += icm20948_accel_to_g(accel.z, ACCEL_RANGE_4G);
+        }
+        sleep_ms(10);
+    }
+
+    gyro_bias_x /= calibration_samples;
+    gyro_bias_y /= calibration_samples;
+    gyro_bias_z /= calibration_samples;
+    accel_bias_x /= calibration_samples;
+    accel_bias_y /= calibration_samples;
+    accel_bias_z /= calibration_samples;
+    accel_bias_z -= 1.0f;  // Remove gravity from Z
+
+    printf("Gyro bias: X=%+.2f Y=%+.2f Z=%+.2f deg/s\n",
+           gyro_bias_x, gyro_bias_y, gyro_bias_z);
+    printf("Accel bias: X=%+.4f Y=%+.4f Z=%+.4f g\n",
+           accel_bias_x, accel_bias_y, accel_bias_z);
+
+    // Attitude indicator parameters - full screen 320x240
+    const int16_t center_x = 160;
+    const int16_t center_y = 120;
+    absolute_time_t last_update = get_absolute_time();
+
+    // AHRS loop - draw to framebuffer, flush once per frame
+    while (true) {
+        input_read(&input_state);
+
+        if (input_just_pressed_key2(&input_state)) {
+            printf("Returning to menu (KEY2 pressed)\n");
+            icm20948_sleep();
+            break;
+        }
+
+        // Read sensor data
+        if (!icm20948_read_accel(&accel) || !icm20948_read_gyro(&gyro))
+            continue;
+
+        absolute_time_t now = get_absolute_time();
+        int64_t dt_us = absolute_time_diff_us(last_update, now);
+        last_update = now;
+        float dt = (float)dt_us / 1000000.0f;
+        if (dt <= 0.0f || dt > 0.2f) {
+            dt = 0.01f;
+        }
+
+        // Convert to physical units and subtract bias
+        float ax = icm20948_accel_to_g(accel.x, ACCEL_RANGE_4G) - accel_bias_x;
+        float ay = icm20948_accel_to_g(accel.y, ACCEL_RANGE_4G) - accel_bias_y;
+        float az = icm20948_accel_to_g(accel.z, ACCEL_RANGE_4G) - accel_bias_z;
+
+        float gx_raw_dps = icm20948_gyro_to_dps(gyro.x, GYRO_RANGE_500DPS);
+        float gy_raw_dps = icm20948_gyro_to_dps(gyro.y, GYRO_RANGE_500DPS);
+        float gz_raw_dps = icm20948_gyro_to_dps(gyro.z, GYRO_RANGE_500DPS);
+
+        float gx_dps = gx_raw_dps - gyro_bias_x;
+        float gy_dps = gy_raw_dps - gyro_bias_y;
+        float gz_dps = gz_raw_dps - gyro_bias_z;
+        if (!isfinite(gx_dps) || !isfinite(gy_dps) || !isfinite(gz_dps)) {
+            continue;
+        }
+        if (fabsf(gx_dps) > 2000.0f || fabsf(gy_dps) > 2000.0f || fabsf(gz_dps) > 2000.0f) {
+            continue;
+        }
+
+        // Auto-trim gyro bias while clearly stationary to suppress long-term drift
+        float acc_norm = sqrtf(ax * ax + ay * ay + az * az);
+        bool stationary = isfinite(acc_norm) &&
+                          fabsf(acc_norm - 1.0f) < 0.08f &&
+                          fabsf(gx_dps) < 1.2f &&
+                          fabsf(gy_dps) < 1.2f &&
+                          fabsf(gz_dps) < 1.2f;
+        if (stationary) {
+            float bias_alpha = dt * 0.08f;  // ~12.5s time constant
+            if (bias_alpha > 0.02f) bias_alpha = 0.02f;
+            gyro_bias_x = (1.0f - bias_alpha) * gyro_bias_x + bias_alpha * gx_raw_dps;
+            gyro_bias_y = (1.0f - bias_alpha) * gyro_bias_y + bias_alpha * gy_raw_dps;
+            gyro_bias_z = (1.0f - bias_alpha) * gyro_bias_z + bias_alpha * gz_raw_dps;
+
+            gx_dps = gx_raw_dps - gyro_bias_x;
+            gy_dps = gy_raw_dps - gyro_bias_y;
+            gz_dps = gz_raw_dps - gyro_bias_z;
+        }
+
+        if (fabsf(gz_dps) < 0.15f) {
+            gz_dps = 0.0f;
+        }
+        float gx = gx_dps * M_PI / 180.0f;
+        float gy = gy_dps * M_PI / 180.0f;
+        float gz = gz_dps * M_PI / 180.0f;
+
+        // Update Madgwick with measured dt (same structure as your reference code)
+        filter.sample_freq = 1.0f / dt;
+        filter.inv_sample_freq = dt;
+        madgwick_update_imu(&filter, gx, gy, gz, ax, ay, az);
+
+        // Map filter angles to current display convention
+        float roll = -madgwick_get_roll_deg(&filter);
+        float pitch = madgwick_get_pitch_deg(&filter);
+        if (!isfinite(roll) || !isfinite(pitch)) {
+            madgwick_init(&filter, 100.0f, 0.10f);
+            continue;
+        }
+
+        if (pitch > 60.0f) pitch = 60.0f;
+        if (pitch < -60.0f) pitch = -60.0f;
+
+        float roll_rad = roll * M_PI / 180.0f;
+        float cos_r = cosf(roll_rad);
+        float sin_r = sinf(roll_rad);
+        float pitch_px = pitch * 2.0f;  // 2 pixels per degree
+
+        // ============================================================
+        // Draw everything to framebuffer (no SPI until flush)
+        // ============================================================
+
+        // Sky/ground with per-pixel scanline rendering
+        for (int16_t y = 0; y < LCD_HEIGHT; y++) {
+            float dy = (float)(y - center_y) + pitch_px;
+
+            if (fabsf(sin_r) < 0.01f) {
+                // Nearly level: entire row is one color
+                uint16_t color = (dy < 0) ? COLOR_SKY : COLOR_BROWN;
+                lcd_fill_rect(0, y, LCD_WIDTH, 1, color);
+            } else {
+                // Banked: find where horizon crosses this row
+                int16_t x_cross = center_x - (int16_t)(dy * cos_r / sin_r);
+
+                if (x_cross <= 0) {
+                    uint16_t color = (sin_r > 0) ? ((dy < 0) ? COLOR_SKY : COLOR_BROWN) : ((dy < 0) ? COLOR_SKY : COLOR_BROWN);
+                    // All pixels on one side of horizon
+                    float test_dy = dy;
+                    float test = cos_r * test_dy + sin_r * (0 - center_x);
+                    color = (test < 0) ? COLOR_SKY : COLOR_BROWN;
+                    lcd_fill_rect(0, y, LCD_WIDTH, 1, color);
+                } else if (x_cross >= LCD_WIDTH) {
+                    float test = cos_r * dy + sin_r * (0 - center_x);
+                    uint16_t color = (test < 0) ? COLOR_SKY : COLOR_BROWN;
+                    lcd_fill_rect(0, y, LCD_WIDTH, 1, color);
+                } else {
+                    // Horizon crosses this row - determine which side is sky
+                    // Test left edge: is it above or below horizon?
+                    float test_left = cos_r * dy + sin_r * (0 - center_x);
+                    uint16_t left_color = (test_left < 0) ? COLOR_SKY : COLOR_BROWN;
+                    uint16_t right_color = (test_left < 0) ? COLOR_BROWN : COLOR_SKY;
+
+                    lcd_fill_rect(0, y, x_cross, 1, left_color);
+                    lcd_fill_rect(x_cross, y, LCD_WIDTH - x_cross, 1, right_color);
+                }
+            }
+        }
+
+        // Aircraft symbol (fixed yellow wings at center)
+        lcd_draw_line(center_x - 35, center_y, center_x - 8, center_y, COLOR_YELLOW);
+        lcd_draw_line(center_x + 8, center_y, center_x + 35, center_y, COLOR_YELLOW);
+        lcd_draw_line(center_x - 35, center_y + 1, center_x - 8, center_y + 1, COLOR_YELLOW);
+        lcd_draw_line(center_x + 8, center_y + 1, center_x + 35, center_y + 1, COLOR_YELLOW);
+        lcd_fill_rect(center_x - 3, center_y - 3, 7, 7, COLOR_YELLOW);
+
+        // ============================================================
+        // Single flush - send entire framebuffer to LCD via DMA
+        // ============================================================
+        lcd_flush();
+    }
+}
+
 // Menu items (UPPERCASE for font compatibility)
 static MenuItem menu_items[] = {
     {"GO FLY", action_go_fly},
     {"BLUETOOTH", action_bluetooth},
     {"GYRO OFFSET", action_gyro_offset},
-    {"RADAR", action_radar}
+    {"RADAR", action_radar},
+    {"TEST GYRO", action_test_gyro}
 };
 
 int main() {
@@ -477,7 +692,7 @@ int main() {
     // Initialize menu
     printf("Initializing menu...\n");
     MenuState menu;
-    menu_init(&menu, menu_items, 4, NULL);  // 4 items: GO FLY, BLUETOOTH, GYRO OFFSET, RADAR
+    menu_init(&menu, menu_items, 5, NULL);  // 5 items: GO FLY, BLUETOOTH, GYRO OFFSET, RADAR, TEST GYRO
 
     // Draw initial menu
     menu_draw_full(&menu);

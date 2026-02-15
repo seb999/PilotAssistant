@@ -24,6 +24,7 @@ target_link_libraries(input_test
     hardware_gpio
     hardware_spi
     hardware_adc
+    hardware_dma
 )
 
 pico_enable_stdio_usb(input_test 1)
@@ -37,6 +38,8 @@ add_executable(menu_system
     st7789_lcd.c
     menu.c
     telemetry_parser.c
+    icm20948_sensor.c
+    madgwick_filter.c
 )
 
 target_link_libraries(menu_system
@@ -44,6 +47,7 @@ target_link_libraries(menu_system
     hardware_gpio
     hardware_spi
     hardware_adc
+    hardware_dma
     m  # Math library for cos, sin, etc.
 )
 
@@ -63,6 +67,7 @@ target_link_libraries(command_sender
     hardware_gpio
     hardware_spi
     hardware_adc
+    hardware_dma
 )
 
 pico_enable_stdio_usb(command_sender 1)
