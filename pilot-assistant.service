@@ -1,0 +1,19 @@
+[Unit]
+Description=Pilot Assistant HUD System
+After=network.target gpsd.service
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sebastien/Projects/PilotAssistant/rpi/c
+ExecStart=/home/sebastien/Projects/PilotAssistant/rpi/c/pilot_assistant
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables if needed
+Environment="DISPLAY=:0"
+
+[Install]
+WantedBy=multi-user.target

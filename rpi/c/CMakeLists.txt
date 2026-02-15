@@ -18,35 +18,12 @@ include_directories(
 # Find required packages (optional, for future use)
 # find_package(Threads REQUIRED)
 
-# Debug programs
-add_executable(debug_adxl345
-    debug/adxl345.c
-)
-
-add_executable(debug_gps
-    debug/gps.c
-)
-
-add_executable(debug_lcd
-    debug/lcd.c
-    src/st7789_rpi.c
-)
-
-add_executable(debug_camera
-    debug/camera.c
-    src/st7789_rpi.c
-)
-
-# Main application - HUD Menu Display
-add_executable(pilot_assistant_hud
-    src/menu_hud.c
-    src/st7789_rpi.c
-)
-
 # Main application - Pilot Assistant
 add_executable(pilot_assistant
     src/main.c
     src/st7789_rpi.c
+    src/mpu6050.c
+    src/gps.c
 )
 
 # Pico Command Receiver - receives commands from Pico2 over USB serial
@@ -58,15 +35,10 @@ add_executable(pico_receiver
 )
 
 # Link libraries
-target_link_libraries(debug_lcd gpiod m)
-target_link_libraries(debug_camera gpiod m)
-target_link_libraries(pilot_assistant_hud gpiod m)
 target_link_libraries(pilot_assistant gpiod m)
 target_link_libraries(pico_receiver gpiod m)
-# target_link_libraries(debug_adxl345 pthread)
-# target_link_libraries(debug_gps pthread)
 
 # Installation
-install(TARGETS debug_adxl345 debug_gps debug_lcd debug_camera pilot_assistant_hud pilot_assistant pico_receiver
+install(TARGETS pilot_assistant pico_receiver
     RUNTIME DESTINATION bin
 )

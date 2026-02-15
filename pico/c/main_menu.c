@@ -37,6 +37,17 @@ typedef struct {
 
 static ButtonReleaseTracker release_tracker = {0};
 
+// Status ribbon state tracking (to avoid unnecessary redraws)
+typedef struct {
+    bool telemetry_received;
+    bool wifi_ok;
+    bool gps_ok;
+    bool bt_ok;
+    bool any_warning;
+} RibbonState;
+
+static RibbonState last_ribbon_state = {false, false, false, false, false};
+
 // Send button command over USB serial
 void send_button_command(uint8_t button_id, const char* action) {
     printf("BTN:%d,%s\n", button_id, action);
@@ -55,17 +66,83 @@ void send_high_level_command(const char* command) {
     fflush(stdout);
 }
 
-// Function to draw status icons at the top
-void draw_status_icons(void) {
-    // Icons are 24x24, positioned at top right with 4px spacing
-    // Red when no telemetry or disconnected, green when connected
-    bool wifi_ok = telemetry_received && latest_telemetry.status.wifi;
-    bool gps_ok = telemetry_received && latest_telemetry.status.gps;
-    bool bt_ok = telemetry_received && latest_telemetry.status.bluetooth;
+// Internal function to actually draw the ribbon (no state check)
+static void draw_ribbon_internal(void) {
+    // Build current state
+    RibbonState current_state;
+    current_state.telemetry_received = telemetry_received;
+    current_state.any_warning = false;
 
-    lcd_draw_wifi_icon(240, 2, wifi_ok);
-    lcd_draw_gps_icon(268, 2, gps_ok);
-    lcd_draw_bluetooth_icon(296, 2, bt_ok);
+    if (telemetry_received) {
+        current_state.wifi_ok = latest_telemetry.status.wifi;
+        current_state.gps_ok = latest_telemetry.status.gps;
+        current_state.bt_ok = latest_telemetry.status.bluetooth;
+        current_state.any_warning = latest_telemetry.warnings.bank_warning ||
+                                    latest_telemetry.warnings.pitch_warning;
+    } else {
+        current_state.wifi_ok = false;
+        current_state.gps_ok = false;
+        current_state.bt_ok = false;
+    }
+
+    // Update state
+    last_ribbon_state = current_state;
+
+    // Draw ribbon background - RED if warning active, dark gray otherwise
+    uint16_t ribbon_color = current_state.any_warning ? COLOR_RED : 0x2104;
+    lcd_fill_rect(0, 0, 320, 28, ribbon_color);
+
+    // If warning active, display WARNING text on left side
+    if (current_state.any_warning) {
+        lcd_draw_string_scaled(5, 6, "WARNING", COLOR_WHITE, COLOR_RED, 2);
+    }
+
+    // Draw status icons on right side
+    lcd_draw_wifi_icon(240, 2, current_state.wifi_ok);
+    lcd_draw_gps_icon(268, 2, current_state.gps_ok);
+    lcd_draw_bluetooth_icon(296, 2, current_state.bt_ok);
+}
+
+// Force draw ribbon (always draw, ignore state check)
+// Used when returning to menu to ensure ribbon is immediately visible
+void draw_ribbon_force(void) {
+    draw_ribbon_internal();
+}
+
+// Function to draw status ribbon with icons and warnings at the top
+// Only redraws if state has changed (no blinking)
+void draw_status_icons(void) {
+    // Build current state
+    RibbonState current_state;
+    current_state.telemetry_received = telemetry_received;
+    current_state.any_warning = false;
+
+    if (telemetry_received) {
+        current_state.wifi_ok = latest_telemetry.status.wifi;
+        current_state.gps_ok = latest_telemetry.status.gps;
+        current_state.bt_ok = latest_telemetry.status.bluetooth;
+        current_state.any_warning = latest_telemetry.warnings.bank_warning ||
+                                    latest_telemetry.warnings.pitch_warning;
+    } else {
+        current_state.wifi_ok = false;
+        current_state.gps_ok = false;
+        current_state.bt_ok = false;
+    }
+
+    // Check if anything changed
+    bool changed = (current_state.telemetry_received != last_ribbon_state.telemetry_received) ||
+                   (current_state.wifi_ok != last_ribbon_state.wifi_ok) ||
+                   (current_state.gps_ok != last_ribbon_state.gps_ok) ||
+                   (current_state.bt_ok != last_ribbon_state.bt_ok) ||
+                   (current_state.any_warning != last_ribbon_state.any_warning);
+
+    // Only redraw if something changed
+    if (!changed) {
+        return;
+    }
+
+    // Draw the ribbon
+    draw_ribbon_internal();
 }
 
 // Read and process serial telemetry data
@@ -108,10 +185,114 @@ void action_bluetooth(void) {
 
 void action_gyro_offset(void) {
     printf("=== GYRO OFFSET selected ===\n");
+
+    // Current offsets (persistent across function calls)
+    static int pitch_offset = 0;
+    static int roll_offset = 0;
+
+    // Send command to enter offset mode
+    send_high_level_command("OFFSET_MODE");
+
+    InputState input_state = {0};
+    char buf[64];
+
+    // Initial full screen draw
     lcd_clear(COLOR_BLACK);
-    lcd_draw_string(60, 100, "GYRO OFFSET", COLOR_YELLOW, COLOR_BLACK);
-    lcd_draw_string(60, 120, "Coming Soon", COLOR_WHITE, COLOR_BLACK);
-    sleep_ms(2000);
+
+    // Title
+    lcd_draw_string_scaled(40, 10, "GYRO OFFSET", COLOR_CYAN, COLOR_BLACK, 3);
+
+    // Instructions
+    lcd_draw_string(20, 60, "UP/DOWN: Pitch offset", COLOR_WHITE, COLOR_BLACK);
+    lcd_draw_string(20, 75, "LEFT/RIGHT: Roll offset", COLOR_WHITE, COLOR_BLACK);
+    lcd_draw_string(20, 90, "KEY2: Back to menu", COLOR_WHITE, COLOR_BLACK);
+
+    // Display initial offsets (large text)
+    snprintf(buf, sizeof(buf), "PITCH: %+d", pitch_offset);
+    lcd_draw_string_scaled(50, 120, buf, COLOR_YELLOW, COLOR_BLACK, 3);
+
+    snprintf(buf, sizeof(buf), "ROLL:  %+d", roll_offset);
+    lcd_draw_string_scaled(50, 155, buf, COLOR_YELLOW, COLOR_BLACK, 3);
+
+    // Offset adjustment loop
+    while (true) {
+        input_read(&input_state);
+
+        // Adjust pitch offset with UP/DOWN - only update the value area
+        if (input_just_pressed_up(&input_state)) {
+            pitch_offset++;
+            char cmd[32];
+            snprintf(cmd, sizeof(cmd), "OFFSET:PITCH:%d", pitch_offset);
+            send_high_level_command(cmd);
+
+            // Clear only the pitch value area (black rectangle)
+            lcd_fill_rect(50, 120, 220, 24, COLOR_BLACK);
+
+            // Redraw only the pitch value
+            snprintf(buf, sizeof(buf), "PITCH: %+d", pitch_offset);
+            lcd_draw_string_scaled(50, 120, buf, COLOR_YELLOW, COLOR_BLACK, 3);
+
+            printf("Pitch offset: %+d\n", pitch_offset);
+        }
+
+        if (input_just_pressed_down(&input_state)) {
+            pitch_offset--;
+            char cmd[32];
+            snprintf(cmd, sizeof(cmd), "OFFSET:PITCH:%d", pitch_offset);
+            send_high_level_command(cmd);
+
+            // Clear only the pitch value area
+            lcd_fill_rect(50, 120, 220, 24, COLOR_BLACK);
+
+            // Redraw only the pitch value
+            snprintf(buf, sizeof(buf), "PITCH: %+d", pitch_offset);
+            lcd_draw_string_scaled(50, 120, buf, COLOR_YELLOW, COLOR_BLACK, 3);
+
+            printf("Pitch offset: %+d\n", pitch_offset);
+        }
+
+        // Adjust roll offset with LEFT/RIGHT - only update the value area
+        if (input_just_pressed_left(&input_state)) {
+            roll_offset--;
+            char cmd[32];
+            snprintf(cmd, sizeof(cmd), "OFFSET:ROLL:%d", roll_offset);
+            send_high_level_command(cmd);
+
+            // Clear only the roll value area
+            lcd_fill_rect(50, 155, 220, 24, COLOR_BLACK);
+
+            // Redraw only the roll value
+            snprintf(buf, sizeof(buf), "ROLL:  %+d", roll_offset);
+            lcd_draw_string_scaled(50, 155, buf, COLOR_YELLOW, COLOR_BLACK, 3);
+
+            printf("Roll offset: %+d\n", roll_offset);
+        }
+
+        if (input_just_pressed_right(&input_state)) {
+            roll_offset++;
+            char cmd[32];
+            snprintf(cmd, sizeof(cmd), "OFFSET:ROLL:%d", roll_offset);
+            send_high_level_command(cmd);
+
+            // Clear only the roll value area
+            lcd_fill_rect(50, 155, 220, 24, COLOR_BLACK);
+
+            // Redraw only the roll value
+            snprintf(buf, sizeof(buf), "ROLL:  %+d", roll_offset);
+            lcd_draw_string_scaled(50, 155, buf, COLOR_YELLOW, COLOR_BLACK, 3);
+
+            printf("Roll offset: %+d\n", roll_offset);
+        }
+
+        // Exit on KEY2 (back to menu)
+        if (input_just_pressed_key2(&input_state)) {
+            printf("Returning to menu (KEY2 pressed)\n");
+            send_high_level_command("OFFSET_EXIT");
+            break;
+        }
+
+        sleep_ms(50);
+    }
 }
 
 // OLD TELEMETRY MENU REMOVED - Use RADAR instead
@@ -393,11 +574,22 @@ int main() {
             release_tracker.right_was_pressed = false;
         }
 
+        // Read telemetry data from Raspberry Pi
+        read_telemetry_data();
+
         // Handle menu navigation
         if (menu_handle_input(&menu, &input_state)) {
             // An action was selected and executed
             // Redraw the menu after action completes
             menu_draw_full(&menu);
+        }
+
+        // Update status ribbon periodically (every 100ms)
+        static uint32_t last_ribbon_update = 0;
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+        if (now - last_ribbon_update >= 100) {
+            draw_status_icons();
+            last_ribbon_update = now;
         }
 
         // Small delay

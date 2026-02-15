@@ -9,7 +9,7 @@
 // Menu colors (RGB565)
 #define MENU_COLOR_BLACK   0x0000
 #define MENU_COLOR_WHITE   0xFFFF
-#define MENU_COLOR_YELLOW  0xFFE0
+#define MENU_COLOR_ORANGE  0x07FF  // Cyan color (matching GYRO OFFSET title)
 #define MENU_COLOR_CYAN    0x07FF
 #define MENU_COLOR_MAGENTA 0xF81F
 

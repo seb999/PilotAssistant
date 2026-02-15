@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 // Serial port configuration
 #define SERIAL_PORT_PRIMARY "/dev/ttyACM0"

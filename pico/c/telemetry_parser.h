@@ -31,12 +31,19 @@ typedef struct {
     bool bluetooth;
 } ConnectivityStatus;
 
+// Structure for warnings
+typedef struct {
+    bool bank_warning;   // Bank angle exceeded threshold
+    bool pitch_warning;  // Pitch angle exceeded threshold
+} WarningStatus;
+
 // Complete telemetry structure
 typedef struct {
     OwnShipData own;
     TrafficData traffic[MAX_TRAFFIC];
     uint8_t traffic_count;
     ConnectivityStatus status;
+    WarningStatus warnings;
     bool valid;
 } TelemetryData;
 

@@ -149,6 +149,17 @@ bool parse_telemetry(const char* json_str, TelemetryData* telemetry) {
         telemetry->status.bluetooth = false;
     }
 
+    // Find "warnings" section
+    char* warnings_section = strstr(json_str, "\"warnings\"");
+    if (warnings_section) {
+        telemetry->warnings.bank_warning = extract_bool(warnings_section, "bank");
+        telemetry->warnings.pitch_warning = extract_bool(warnings_section, "pitch");
+    } else {
+        // Default to no warnings if section not present
+        telemetry->warnings.bank_warning = false;
+        telemetry->warnings.pitch_warning = false;
+    }
+
     telemetry->valid = true;
     return true;
 }

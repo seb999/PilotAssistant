@@ -59,6 +59,7 @@ void lcd_display_splash(const uint8_t* image_data, size_t data_len);
 void lcd_draw_wifi_icon(uint16_t x, uint16_t y, bool connected);
 void lcd_draw_gps_icon(uint16_t x, uint16_t y, bool connected);
 void lcd_draw_bluetooth_icon(uint16_t x, uint16_t y, bool connected);
+void lcd_draw_warning_icon(uint16_t x, uint16_t y, bool active);
 
 // Draw bitmap with transparency (skips COLOR_WHITE pixels, optionally recolors)
 void lcd_draw_bitmap_transparent(uint16_t x, uint16_t y, uint16_t width, uint16_t height,

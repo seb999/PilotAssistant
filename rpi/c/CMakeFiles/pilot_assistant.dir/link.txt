@@ -1,0 +1,1 @@
+/usr/bin/cc  -Wall -Wextra -O2 CMakeFiles/pilot_assistant.dir/src/main.c.o CMakeFiles/pilot_assistant.dir/src/st7789_rpi.c.o CMakeFiles/pilot_assistant.dir/src/mpu6050.c.o CMakeFiles/pilot_assistant.dir/src/gps.c.o -o pilot_assistant  -lgpiod -lm 

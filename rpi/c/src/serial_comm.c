@@ -2,6 +2,8 @@
  * Serial Communication Module Implementation
  */
 
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
 #include "serial_comm.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +15,7 @@
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 
 // Configure serial port settings
 static int configure_serial(int fd) {
@@ -56,8 +59,8 @@ static int configure_serial(int fd) {
     tty.c_oflag &= ~OPOST;
     tty.c_oflag &= ~ONLCR;
 
-    // Non-blocking read with timeout
-    tty.c_cc[VTIME] = 1;  // 0.1 second timeout
+    // Non-blocking read (no timeout for max responsiveness)
+    tty.c_cc[VTIME] = 0;  // No timeout
     tty.c_cc[VMIN] = 0;   // Return immediately with available data
 
     // Apply settings

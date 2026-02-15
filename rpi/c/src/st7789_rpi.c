@@ -23,10 +23,10 @@
 
 // SPI configuration
 #define SPI_DEVICE   "/dev/spidev0.0"
-#define SPI_SPEED_HZ 40000000  // 40 MHz
+#define SPI_SPEED_HZ 40000000  // 40 MHz (stable speed)
 
 // GPIO chip
-#define GPIO_CHIP "gpiochip4"
+#define GPIO_CHIP "gpiochip0"
 
 // Global handles
 static int spi_fd = -1;
@@ -543,14 +543,87 @@ uint16_t* lcd_get_framebuffer(void) {
 void lcd_display_framebuffer(void) {
     if (!framebuffer) return;
 
-    // Use existing lcd_draw_image function which handles chunked transfers
-    lcd_draw_image(0, 0, LCD_WIDTH, LCD_HEIGHT, framebuffer);
+    // Set window to full screen
+    lcd_set_window(0, 0, LCD_WIDTH, LCD_HEIGHT);
+
+    // Optimized: Use larger chunks and loop unrolling for conversion
+    const size_t CHUNK_PIXELS = 16384;  // 32KB chunks (16384 pixels * 2 bytes)
+    uint8_t buffer[CHUNK_PIXELS * 2];
+    uint32_t total_pixels = LCD_WIDTH * LCD_HEIGHT;
+    uint32_t pixels_sent = 0;
+
+    while (pixels_sent < total_pixels) {
+        uint32_t chunk_pixels = (total_pixels - pixels_sent) > CHUNK_PIXELS ?
+                                CHUNK_PIXELS : (total_pixels - pixels_sent);
+
+        // Fast conversion using pointer arithmetic and loop unrolling
+        uint16_t *src = framebuffer + pixels_sent;
+        uint8_t *dst = buffer;
+
+        // Process 4 pixels at a time for better CPU cache usage
+        uint32_t i;
+        for (i = 0; i + 3 < chunk_pixels; i += 4) {
+            uint16_t p0 = src[0];
+            uint16_t p1 = src[1];
+            uint16_t p2 = src[2];
+            uint16_t p3 = src[3];
+
+            dst[0] = p0 >> 8;
+            dst[1] = p0 & 0xFF;
+            dst[2] = p1 >> 8;
+            dst[3] = p1 & 0xFF;
+            dst[4] = p2 >> 8;
+            dst[5] = p2 & 0xFF;
+            dst[6] = p3 >> 8;
+            dst[7] = p3 & 0xFF;
+
+            src += 4;
+            dst += 8;
+        }
+
+        // Handle remaining pixels
+        for (; i < chunk_pixels; i++) {
+            uint16_t pixel = *src++;
+            *dst++ = pixel >> 8;
+            *dst++ = pixel & 0xFF;
+        }
+
+        // Use lcd_write_buffer which properly handles DC line and SPI
+        lcd_write_buffer(buffer, chunk_pixels * 2);
+        pixels_sent += chunk_pixels;
+    }
 }
 
 void lcd_fb_clear(uint16_t color) {
     if (!framebuffer) return;
-    for (int i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) {
-        framebuffer[i] = color;
+
+    // Fast clear using optimized approach
+    if (color == 0x0000) {
+        // Black - use memset (fastest)
+        memset(framebuffer, 0, LCD_WIDTH * LCD_HEIGHT * sizeof(uint16_t));
+    } else {
+        // Other colors - use optimized loop with unrolling
+        uint32_t total = LCD_WIDTH * LCD_HEIGHT;
+        uint16_t *fb = framebuffer;
+
+        // Process 8 pixels at a time
+        uint32_t i;
+        for (i = 0; i + 7 < total; i += 8) {
+            fb[0] = color;
+            fb[1] = color;
+            fb[2] = color;
+            fb[3] = color;
+            fb[4] = color;
+            fb[5] = color;
+            fb[6] = color;
+            fb[7] = color;
+            fb += 8;
+        }
+
+        // Handle remaining pixels
+        for (; i < total; i++) {
+            *fb++ = color;
+        }
     }
 }
 
@@ -561,16 +634,33 @@ void lcd_fb_draw_pixel(uint16_t x, uint16_t y, uint16_t color) {
 
 void lcd_fb_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) {
     if (!framebuffer) return;
+    if (x >= LCD_WIDTH || y >= LCD_HEIGHT) return;
 
+    // Clip to screen bounds
+    if (x + w > LCD_WIDTH) w = LCD_WIDTH - x;
+    if (y + h > LCD_HEIGHT) h = LCD_HEIGHT - y;
+
+    // Optimized: fill row by row with pointer arithmetic
     for (uint16_t dy = 0; dy < h; dy++) {
-        uint16_t ypos = y + dy;
-        if (ypos >= LCD_HEIGHT) break;
+        uint16_t *row = framebuffer + (y + dy) * LCD_WIDTH + x;
 
-        for (uint16_t dx = 0; dx < w; dx++) {
-            uint16_t xpos = x + dx;
-            if (xpos >= LCD_WIDTH) break;
+        // Fill row using unrolled loop for speed
+        uint16_t dx;
+        for (dx = 0; dx + 7 < w; dx += 8) {
+            row[0] = color;
+            row[1] = color;
+            row[2] = color;
+            row[3] = color;
+            row[4] = color;
+            row[5] = color;
+            row[6] = color;
+            row[7] = color;
+            row += 8;
+        }
 
-            framebuffer[ypos * LCD_WIDTH + xpos] = color;
+        // Handle remaining pixels
+        for (; dx < w; dx++) {
+            *row++ = color;
         }
     }
 }

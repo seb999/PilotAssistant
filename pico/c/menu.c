@@ -2,13 +2,14 @@
 #include <stdio.h>
 #include <string.h>
 
-// Menu item positions for 320x240 display (similar to MicroPython)
+// Menu item positions for 320x240 display (below status ribbon)
+// Status ribbon is 28px high, menu starts at y=30
 // Each item: x, y, width, height
 static const MenuRect default_positions[] = {
-    {5, 20, 310, 35},   // Go Fly
-    {5, 60, 310, 35},   // Bluetooth
-    {5, 100, 310, 35},  // Gyro Offset
-    {5, 140, 310, 35}   // Telemetry
+    {5, 32, 310, 35},   // Go Fly
+    {5, 72, 310, 35},   // Bluetooth
+    {5, 112, 310, 35},  // Gyro Offset
+    {5, 152, 310, 35}   // Radar
 };
 
 void menu_init(MenuState* menu, MenuItem* items, int count, MenuRect* positions) {
@@ -36,6 +37,10 @@ void menu_draw_icon_gyro(uint16_t x, uint16_t y, uint16_t color) {
     lcd_fill_rect(x + 9, y + 7, 2, 6, color);  // Vertical
 }
 
+// Forward declarations for status ribbon (defined in main_menu.c)
+extern void draw_status_icons(void);
+extern void draw_ribbon_force(void);  // Force redraw without state check
+
 // Draw a single menu item
 void menu_draw_item(MenuState* menu, int index, bool selected) {
     if (index < 0 || index >= menu->item_count) return;
@@ -44,20 +49,20 @@ void menu_draw_item(MenuState* menu, int index, bool selected) {
     const char* label = menu->items[index].label;
 
     if (selected) {
-        // Selected: YELLOW background with BLACK text
-        lcd_fill_rect(rect.x, rect.y, rect.width, rect.height, MENU_COLOR_YELLOW);
+        // Selected: ORANGE background with BLACK text
+        lcd_fill_rect(rect.x, rect.y, rect.width, rect.height, MENU_COLOR_ORANGE);
 
         // Draw text (left-aligned, vertically centered, scale=3)
         uint16_t text_y = rect.y + 8;  // Approximate vertical center for text
-        lcd_draw_string_scaled(rect.x + 10, text_y, label, MENU_COLOR_BLACK, MENU_COLOR_YELLOW, 3);
+        lcd_draw_string_scaled(rect.x + 10, text_y, label, MENU_COLOR_BLACK, MENU_COLOR_ORANGE, 3);
 
     } else {
-        // Unselected: BLACK background with YELLOW text
+        // Unselected: BLACK background with ORANGE text
         lcd_fill_rect(rect.x, rect.y, rect.width, rect.height, MENU_COLOR_BLACK);
 
         // Draw text (left-aligned, scale=3)
         uint16_t text_y = rect.y + 8;
-        lcd_draw_string_scaled(rect.x + 10, text_y, label, MENU_COLOR_YELLOW, MENU_COLOR_BLACK, 3);
+        lcd_draw_string_scaled(rect.x + 10, text_y, label, MENU_COLOR_ORANGE, MENU_COLOR_BLACK, 3);
     }
 }
 
@@ -65,6 +70,9 @@ void menu_draw_item(MenuState* menu, int index, bool selected) {
 void menu_draw_full(MenuState* menu) {
     // Clear screen
     lcd_clear(MENU_COLOR_BLACK);
+
+    // Force draw status ribbon at top (always show immediately when menu appears)
+    draw_ribbon_force();
 
     // Draw all menu items
     for (int i = 0; i < menu->item_count; i++) {

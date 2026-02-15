@@ -1,0 +1,1 @@
+/usr/bin/cc  -Wall -Wextra -O2 CMakeFiles/debug_mpu6050.dir/debug/mpu6050.c.o -o debug_mpu6050  -lm 

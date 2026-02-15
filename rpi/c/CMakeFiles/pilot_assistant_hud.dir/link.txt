@@ -1,0 +1,1 @@
+/usr/bin/cc  -Wall -Wextra -O2 CMakeFiles/pilot_assistant_hud.dir/src/menu_hud.c.o CMakeFiles/pilot_assistant_hud.dir/src/st7789_rpi.c.o -o pilot_assistant_hud  -lgpiod -lm 

@@ -1,0 +1,1 @@
+/usr/bin/cc  -Wall -Wextra -O2 CMakeFiles/pico_receiver.dir/src/pico_receiver.c.o CMakeFiles/pico_receiver.dir/src/serial_comm.c.o CMakeFiles/pico_receiver.dir/src/pico_commands.c.o CMakeFiles/pico_receiver.dir/src/st7789_rpi.c.o -o pico_receiver  -lgpiod -lm 

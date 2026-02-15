@@ -383,7 +383,7 @@ void lcd_draw_bitmap_transparent(uint16_t x, uint16_t y, uint16_t width, uint16_
 
 // Draw WiFi icon (signal waves) - Now using 32x32 bitmap
 void lcd_draw_wifi_icon(uint16_t x, uint16_t y, bool connected) {
-    uint16_t color = connected ? COLOR_GREEN : COLOR_AMBER;
+    uint16_t color = connected ? COLOR_GREEN : COLOR_RED;
 
     #include "img/wifi_icon.h"
 
@@ -394,7 +394,7 @@ void lcd_draw_wifi_icon(uint16_t x, uint16_t y, bool connected) {
 
 // Draw GPS icon - Now using 32x32 bitmap
 void lcd_draw_gps_icon(uint16_t x, uint16_t y, bool connected) {
-    uint16_t color = connected ? COLOR_GREEN : COLOR_AMBER;
+    uint16_t color = connected ? COLOR_GREEN : COLOR_RED;
 
     #include "img/gps_icon.h"
 
@@ -405,13 +405,24 @@ void lcd_draw_gps_icon(uint16_t x, uint16_t y, bool connected) {
 
 // Draw Bluetooth icon - Now using 32x32 bitmap
 void lcd_draw_bluetooth_icon(uint16_t x, uint16_t y, bool connected) {
-    uint16_t color = connected ? COLOR_GREEN : COLOR_AMBER;
+    uint16_t color = connected ? COLOR_GREEN : COLOR_RED;
 
     #include "img/bluetooth_icon.h"
 
     // Draw the bitmap with color replacement
     lcd_draw_bitmap_transparent(x, y, BLUETOOTH_ICON_WIDTH, BLUETOOTH_ICON_HEIGHT,
                                  bluetooth_icon_data, color);
+}
+
+// Draw warning triangle icon - Now using 24x24 bitmap
+void lcd_draw_warning_icon(uint16_t x, uint16_t y, bool active) {
+    uint16_t color = active ? COLOR_RED : COLOR_AMBER;
+
+    #include "img/warning_icon.h"
+
+    // Draw the bitmap with color replacement
+    lcd_draw_bitmap_transparent(x, y, WARNING_ICON_WIDTH, WARNING_ICON_HEIGHT,
+                                 warning_icon_data, color);
 }
 
 // Draw a single pixel
