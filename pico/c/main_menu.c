@@ -455,7 +455,7 @@ void action_test_gyro(void) {
 
     // Madgwick IMU-only filter (6DOF)
     MadgwickFilter filter;
-    madgwick_init(&filter, 100.0f, 0.10f);
+    madgwick_init(&filter, 100.0f, 0.05f);
 
     InputState input_state = {0};
     SensorData accel, gyro;
@@ -497,6 +497,9 @@ void action_test_gyro(void) {
     const int16_t center_x = 160;
     const int16_t center_y = 120;
     absolute_time_t last_update = get_absolute_time();
+    float display_roll = 0.0f;
+    float display_pitch = 0.0f;
+    bool display_initialized = false;
 
     // AHRS loop - draw to framebuffer, flush once per frame
     while (true) {
@@ -547,11 +550,15 @@ void action_test_gyro(void) {
                           fabsf(gy_dps) < 1.2f &&
                           fabsf(gz_dps) < 1.2f;
         if (stationary) {
-            float bias_alpha = dt * 0.08f;  // ~12.5s time constant
+            float bias_alpha = dt * 0.08f;  // ~12.5s time constant (X/Y)
             if (bias_alpha > 0.02f) bias_alpha = 0.02f;
             gyro_bias_x = (1.0f - bias_alpha) * gyro_bias_x + bias_alpha * gx_raw_dps;
             gyro_bias_y = (1.0f - bias_alpha) * gyro_bias_y + bias_alpha * gy_raw_dps;
-            gyro_bias_z = (1.0f - bias_alpha) * gyro_bias_z + bias_alpha * gz_raw_dps;
+
+            // Faster adaptation on Z-axis to suppress heading crawl when still
+            float z_bias_alpha = dt * 0.25f;  // ~4s time constant
+            if (z_bias_alpha > 0.05f) z_bias_alpha = 0.05f;
+            gyro_bias_z = (1.0f - z_bias_alpha) * gyro_bias_z + z_bias_alpha * gz_raw_dps;
 
             gx_dps = gx_raw_dps - gyro_bias_x;
             gy_dps = gy_raw_dps - gyro_bias_y;
@@ -574,9 +581,28 @@ void action_test_gyro(void) {
         float roll = -madgwick_get_roll_deg(&filter);
         float pitch = madgwick_get_pitch_deg(&filter);
         if (!isfinite(roll) || !isfinite(pitch)) {
-            madgwick_init(&filter, 100.0f, 0.10f);
+            madgwick_init(&filter, 100.0f, 0.05f);
+            display_initialized = false;
             continue;
         }
+
+        // Smooth display angles to reduce ground/sky flicker on tiny noise
+        if (!display_initialized) {
+            display_roll = roll;
+            display_pitch = pitch;
+            display_initialized = true;
+        } else {
+            float smooth_alpha = stationary ? 0.08f : 0.25f;
+            display_roll += smooth_alpha * (roll - display_roll);
+            display_pitch += smooth_alpha * (pitch - display_pitch);
+        }
+
+        // Small deadband around level flight to prevent pixel-level color toggling
+        if (fabsf(display_roll) < 0.35f) display_roll = 0.0f;
+        if (fabsf(display_pitch) < 0.35f) display_pitch = 0.0f;
+
+        roll = display_roll;
+        pitch = display_pitch;
 
         if (pitch > 60.0f) pitch = 60.0f;
         if (pitch < -60.0f) pitch = -60.0f;
