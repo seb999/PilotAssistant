@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(export PICO_SDK_PATH=/Users/sebastien/_Git/PICO/pico-sdk:*)",
+      "Bash(make menu_system:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

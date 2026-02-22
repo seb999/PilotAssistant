@@ -113,6 +113,12 @@ bool icm20948_read_accel(SensorData* data);
 bool icm20948_read_gyro(SensorData* data);
 
 /**
+ * Read accelerometer and gyroscope data in single burst (optimized)
+ * Returns: true on success, false on failure
+ */
+bool icm20948_read_accel_gyro(SensorData* accel, SensorData* gyro);
+
+/**
  * Read magnetometer data (raw 16-bit values in µT)
  * Returns: true on success, false on failure
  */

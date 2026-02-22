@@ -8,7 +8,7 @@
 
 // SPI instance
 #define SPI_PORT spi1
-#define SPI_BAUDRATE (20000000)  // 20 MHz (safe for ST7789)
+#define SPI_BAUDRATE (40000000)  // 40 MHz (pushing limits for faster refresh)
 
 // Framebuffer in RAM (320x240 RGB565 = 153,600 bytes)
 static uint16_t framebuffer[LCD_WIDTH * LCD_HEIGHT];
@@ -432,6 +432,9 @@ void lcd_draw_bitmap_transparent(uint16_t x, uint16_t y, uint16_t width, uint16_
     }
 }
 
+// Icon functions commented out - requires img/ directory with icon data
+// Uncomment and add icon files if needed for other projects
+/*
 void lcd_draw_wifi_icon(uint16_t x, uint16_t y, bool connected) {
     uint16_t color = connected ? COLOR_GREEN : COLOR_RED;
     #include "img/wifi_icon.h"
@@ -455,6 +458,7 @@ void lcd_draw_warning_icon(uint16_t x, uint16_t y, bool active) {
     #include "img/warning_icon.h"
     lcd_draw_bitmap_transparent(x, y, WARNING_ICON_WIDTH, WARNING_ICON_HEIGHT, warning_icon_data, color);
 }
+*/
 
 void lcd_draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color) {
     int32_t dx = abs((int32_t)x1 - (int32_t)x0);

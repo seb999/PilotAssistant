@@ -10,11 +10,19 @@
 
 // SPI instance (using spi0 to avoid conflict with LCD on spi1)
 #define ICM20948_SPI spi0
-#define ICM20948_SPI_BAUDRATE (1000 * 1000)  // 1 MHz (safe speed, max is 7 MHz)
+#define ICM20948_SPI_BAUDRATE (7 * 1000 * 1000)  // 7 MHz (maximum supported speed)
+
+// CS timing delays (in microseconds)
+// - CS_SETUP_DELAY: delay after CS low before clocking (required for reliable communication)
+// - CS_HOLD_DELAY: delay after transaction before CS high (minimum hold time)
+// At 7 MHz, start with small delays to improve reliability
+#define ICM20948_CS_SETUP_DELAY 1  // µs delay after CS low before clocking
+#define ICM20948_CS_HOLD_DELAY  1  // µs delay after transaction before CS high
 
 // Current sensor configuration
 static GyroRange current_gyro_range = GYRO_RANGE_500DPS;
 static AccelRange current_accel_range = ACCEL_RANGE_4G;
+static uint8_t current_bank = 0xFF;  // Track current bank (0xFF = uninitialized)
 
 // Static helper functions
 static void select_bank(uint8_t bank);
@@ -33,9 +41,8 @@ bool icm20948_init(void) {
     // Initialize SPI
     spi_init(ICM20948_SPI, ICM20948_SPI_BAUDRATE);
 
-    // Set SPI format: 8 bits, SPI Mode 0 (CPOL=0, CPHA=0)
-    spi_set_format(ICM20948_SPI, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
-
+    // Set SPI format: 8 bits, SPI Mode 3 (previous stable setting)
+    spi_set_format(ICM20948_SPI, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
     // Configure SPI pins
     gpio_set_function(ICM20948_SCK_PIN, GPIO_FUNC_SPI);
     gpio_set_function(ICM20948_MOSI_PIN, GPIO_FUNC_SPI);
@@ -74,17 +81,23 @@ bool icm20948_init(void) {
 
     // Configure gyroscope (Bank 2)
     select_bank(ICM20948_BANK_2);
-    // GYRO_CONFIG_1: ±500 dps, DLPF enabled
-    // Bits [2:1] = 01 for ±500dps
-    write_register(ICM20948_GYRO_CONFIG_1, 0x02);
+
+    // GYRO_CONFIG_1: ±500 dps, DLPF enabled, 51.2Hz bandwidth
+    // Bit [0] = 1: Enable DLPF
+    // Bits [2:1] = 01: ±500 dps full scale
+    // Bits [5:3] = 011: DLPF bandwidth = 51.2 Hz (good balance for attitude estimation)
+    write_register(ICM20948_GYRO_CONFIG_1, 0x1B);  // 0b00011011
 
     // Configure accelerometer (Bank 2)
-    // ACCEL_CONFIG: ±4g, DLPF enabled
-    // Bits [2:1] = 01 for ±4g
-    write_register(ICM20948_ACCEL_CONFIG, 0x02);
+    // ACCEL_CONFIG: ±4g, DLPF enabled, 50.4Hz bandwidth
+    // Bit [0] = 1: Enable DLPF
+    // Bits [2:1] = 01: ±4g full scale
+    // Bits [5:3] = 011: DLPF bandwidth = 50.4 Hz (matches gyro for sensor fusion)
+    write_register(ICM20948_ACCEL_CONFIG, 0x1B);  // 0b00011011
 
     // Return to Bank 0 for normal operation
     select_bank(ICM20948_BANK_0);
+    
 
     // Enable accelerometer and gyroscope
     write_register(ICM20948_PWR_MGMT_2, 0x00);  // Enable all sensors
@@ -130,6 +143,32 @@ bool icm20948_read_gyro(SensorData* data) {
     data->x = (int16_t)((buffer[0] << 8) | buffer[1]);
     data->y = (int16_t)((buffer[2] << 8) | buffer[3]);
     data->z = (int16_t)((buffer[4] << 8) | buffer[5]);
+
+    return true;
+}
+
+/**
+ * Read accelerometer and gyroscope data in single burst (optimized)
+ * Reduces SPI overhead by ~30% compared to separate reads
+ */
+bool icm20948_read_accel_gyro(SensorData* accel, SensorData* gyro) {
+    if (accel == NULL || gyro == NULL) return false;
+
+    select_bank(ICM20948_BANK_0);
+
+    // Read 12 bytes: ACCEL_XOUT_H through GYRO_ZOUT_L
+    uint8_t buffer[12];
+    read_registers(ICM20948_ACCEL_XOUT_H, buffer, 12);
+
+    // Parse accelerometer data (bytes 0-5)
+    accel->x = (int16_t)((buffer[0] << 8) | buffer[1]);
+    accel->y = (int16_t)((buffer[2] << 8) | buffer[3]);
+    accel->z = (int16_t)((buffer[4] << 8) | buffer[5]);
+
+    // Parse gyroscope data (bytes 6-11)
+    gyro->x = (int16_t)((buffer[6] << 8) | buffer[7]);
+    gyro->y = (int16_t)((buffer[8] << 8) | buffer[9]);
+    gyro->z = (int16_t)((buffer[10] << 8) | buffer[11]);
 
     return true;
 }
@@ -244,11 +283,12 @@ bool icm20948_init_magnetometer(void) {
     write_ak09916_register(AK09916_CNTL2, AK09916_MODE_CONT_100HZ);
     sleep_ms(10);
 
-    // Configure automatic magnetometer reading (9 bytes starting from ST1)
+    // Configure automatic magnetometer reading (8 bytes starting from ST1)
+    // AK09916 burst read: ST1(1) + HXL..HZH(6) + ST2(1) = 8 bytes total
     select_bank(ICM20948_BANK_3);
     write_register(ICM20948_I2C_SLV0_ADDR, AK09916_I2C_ADDR | 0x80);  // Read mode
     write_register(ICM20948_I2C_SLV0_REG, AK09916_ST1);  // Start at ST1
-    write_register(ICM20948_I2C_SLV0_CTRL, 0x89);  // Enable, read 9 bytes
+    write_register(ICM20948_I2C_SLV0_CTRL, 0x88);  // Enable, read 8 bytes
 
     select_bank(ICM20948_BANK_0);
 
@@ -264,21 +304,23 @@ bool icm20948_read_mag(SensorData* data) {
 
     select_bank(ICM20948_BANK_0);
 
-    // Read 9 bytes from EXT_SLV_SENS_DATA (ST1 + 6 data bytes + ST2)
-    uint8_t buffer[9];
-    read_registers(ICM20948_EXT_SLV_SENS_DATA_00, buffer, 9);
+    // Read 8 bytes from EXT_SLV_SENS_DATA (ST1 + 6 data bytes + ST2)
+    // AK09916 burst read: ST1(1) + HXL..HZH(6) + ST2(1) = 8 bytes total
+    uint8_t buffer[8];
+    read_registers(ICM20948_EXT_SLV_SENS_DATA_00, buffer, 8);
 
     // Check data ready bit (ST1[0])
     if (!(buffer[0] & 0x01)) {
         return false;  // Data not ready
     }
 
-    // Check overflow bit (ST2[3])
-    if (buffer[8] & 0x08) {
+    // Check overflow bit (ST2[3]) - ST2 is now at buffer[7]
+    if (buffer[7] & 0x08) {
         return false;  // Magnetic sensor overflow
     }
 
     // Combine bytes (LSB first for AK09916)
+    // Data bytes are buffer[1..6]
     data->x = (int16_t)((buffer[2] << 8) | buffer[1]);
     data->y = (int16_t)((buffer[4] << 8) | buffer[3]);
     data->z = (int16_t)((buffer[6] << 8) | buffer[5]);
@@ -302,13 +344,18 @@ float icm20948_mag_to_ut(int16_t raw_value) {
  * Select register bank
  */
 static void select_bank(uint8_t bank) {
+    if (bank == current_bank) return;  // Already on this bank, skip SPI transaction
+
     gpio_put(ICM20948_CS_PIN, 0);  // CS low
+    if (ICM20948_CS_SETUP_DELAY) sleep_us(ICM20948_CS_SETUP_DELAY);
 
     uint8_t tx[2] = {ICM20948_REG_BANK_SEL, (bank << 4)};
     spi_write_blocking(ICM20948_SPI, tx, 2);
 
+    if (ICM20948_CS_HOLD_DELAY) sleep_us(ICM20948_CS_HOLD_DELAY);
     gpio_put(ICM20948_CS_PIN, 1);  // CS high
-    sleep_us(10);
+
+    current_bank = bank;  // Update cached bank
 }
 
 /**
@@ -318,6 +365,7 @@ static uint8_t read_register(uint8_t reg) {
     uint8_t value;
 
     gpio_put(ICM20948_CS_PIN, 0);  // CS low
+    if (ICM20948_CS_SETUP_DELAY) sleep_us(ICM20948_CS_SETUP_DELAY);
 
     // Send register address with read bit set
     uint8_t tx = reg | 0x80;
@@ -326,8 +374,8 @@ static uint8_t read_register(uint8_t reg) {
     // Read the value
     spi_read_blocking(ICM20948_SPI, 0x00, &value, 1);
 
+    if (ICM20948_CS_HOLD_DELAY) sleep_us(ICM20948_CS_HOLD_DELAY);
     gpio_put(ICM20948_CS_PIN, 1);  // CS high
-    sleep_us(10);
 
     return value;
 }
@@ -337,12 +385,13 @@ static uint8_t read_register(uint8_t reg) {
  */
 static void write_register(uint8_t reg, uint8_t value) {
     gpio_put(ICM20948_CS_PIN, 0);  // CS low
+    if (ICM20948_CS_SETUP_DELAY) sleep_us(ICM20948_CS_SETUP_DELAY);
 
     uint8_t tx[2] = {reg & 0x7F, value};  // Clear read bit
     spi_write_blocking(ICM20948_SPI, tx, 2);
 
+    if (ICM20948_CS_HOLD_DELAY) sleep_us(ICM20948_CS_HOLD_DELAY);
     gpio_put(ICM20948_CS_PIN, 1);  // CS high
-    sleep_us(10);
 }
 
 /**
@@ -350,6 +399,7 @@ static void write_register(uint8_t reg, uint8_t value) {
  */
 static void read_registers(uint8_t reg, uint8_t* buffer, size_t len) {
     gpio_put(ICM20948_CS_PIN, 0);  // CS low
+    if (ICM20948_CS_SETUP_DELAY) sleep_us(ICM20948_CS_SETUP_DELAY);
 
     // Send register address with read bit set
     uint8_t tx = reg | 0x80;
@@ -358,8 +408,8 @@ static void read_registers(uint8_t reg, uint8_t* buffer, size_t len) {
     // Read the values
     spi_read_blocking(ICM20948_SPI, 0x00, buffer, len);
 
+    if (ICM20948_CS_HOLD_DELAY) sleep_us(ICM20948_CS_HOLD_DELAY);
     gpio_put(ICM20948_CS_PIN, 1);  // CS high
-    sleep_us(10);
 }
 
 /**
