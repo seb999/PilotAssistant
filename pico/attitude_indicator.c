@@ -81,7 +81,7 @@ static void lcd_status(const char* line1, const char* line2) {
     lcd_draw_string_scaled(76, 110, line1, COLOR_WHITE, COLOR_BLACK, 2);
 
     if (line2 && strlen(line2) > 0) {
-        lcd_draw_string_scaled(10, 140, line2, COLOR_YELLOW, COLOR_BLACK, 2);
+        lcd_draw_string_scaled(10, 140, line2, COLOR_WHITE, COLOR_BLACK, 2);
     }
     lcd_flush();
 }
@@ -122,8 +122,8 @@ static void calibrate_gyro_bias(void) {
 static void setup(void) {
     printf("\n=== Attitude Indicator Startup ===\n");
 
-    // Show single initialization message
-    lcd_status("Initialisation", "");
+    // Show single initialization message to guide user
+    lcd_status("GYRO INITIALIZING", "HOLD DEVICE STEADY");
 
     // Initialize ICM-20948
     if (!icm20948_init()) {
