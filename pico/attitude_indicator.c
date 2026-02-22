@@ -74,16 +74,20 @@ static float clampf(float x, float lo, float hi) {
 // ===================== STATUS DISPLAY =====================
 static void lcd_status(const char* line1, const char* line2) {
     lcd_clear(COLOR_BLACK);
-    lcd_draw_string_scaled(10, 50, line1, COLOR_WHITE, COLOR_BLACK, 2);
+
+    // Draw centered text (scale 2)
+    // "Initialisation" = 14 chars * 12 pixels = 168 pixels wide
+    // Center: (320 - 168) / 2 = 76
+    lcd_draw_string_scaled(76, 110, line1, COLOR_WHITE, COLOR_BLACK, 2);
+
     if (line2 && strlen(line2) > 0) {
-        lcd_draw_string_scaled(10, 80, line2, COLOR_YELLOW, COLOR_BLACK, 2);
+        lcd_draw_string_scaled(10, 140, line2, COLOR_YELLOW, COLOR_BLACK, 2);
     }
     lcd_flush();
 }
 
 // ===================== GYRO CALIBRATION =====================
 static void calibrate_gyro_bias(void) {
-    lcd_status("Calibrating gyro", "Keep STILL...");
     printf("Calibrating gyro bias: keep STILL...\n");
 
     double sx = 0.0, sy = 0.0, sz = 0.0;
@@ -118,8 +122,10 @@ static void calibrate_gyro_bias(void) {
 static void setup(void) {
     printf("\n=== Attitude Indicator Startup ===\n");
 
+    // Show single initialization message
+    lcd_status("Initialisation", "");
+
     // Initialize ICM-20948
-    lcd_status("Init ICM-20948", "Please wait...");
     if (!icm20948_init()) {
         lcd_status("ICM-20948 FAILED", "Check wiring!");
         printf("ERROR: ICM-20948 init failed\n");
@@ -128,29 +134,18 @@ static void setup(void) {
         }
     }
 
-    lcd_status("ICM-20948 OK", "Init magnetometer...");
-    sleep_ms(300);
-
 #if USE_MAG
     // Initialize magnetometer
     if (!icm20948_init_magnetometer()) {
-        lcd_status("Magnetometer WARN", "Will use IMU only");
         printf("WARNING: Magnetometer init failed, using IMU-only mode\n");
-        sleep_ms(1500);
-    } else {
-        lcd_status("Magnetometer OK", "");
-        sleep_ms(500);
     }
 #endif
 
     // Initialize Madgwick filter (beta optimized for fast convergence)
     madgwick_init(&filter, (float)LOOP_HZ, 0.15f);  // Lower beta = trust gyro more, faster response
 
-    // Calibrate gyro
+    // Calibrate gyro (keep same status message on screen)
     calibrate_gyro_bias();
-
-    lcd_status("Ready!", USE_MAG ? "9DOF (HDG)" : "IMU-only");
-    sleep_ms(800);
 
     printf("Setup complete. Starting main loop...\n");
 }
@@ -259,6 +254,24 @@ static void draw_attitude_indicator(float roll, float pitch, float heading) {
     bool wifi_status = telemetry_received ? latest_telemetry.status.wifi : false;
     lcd_draw_gps_icon(268, 2, gps_status);
     lcd_draw_wifi_icon(296, 2, wifi_status);
+
+    // Bank angle warning (>20 degrees)
+    if (fabsf(roll) > 20.0f) {
+        // Draw red background box (wider to accommodate angle text)
+        int warning_y = LCD_HEIGHT - 35;
+        int warning_height = 25;
+        for (int y = warning_y; y < warning_y + warning_height; y++) {
+            for (int x = center_x - 50; x < center_x + 50; x++) {
+                if (x >= 0 && x < LCD_WIDTH && y >= 0 && y < LCD_HEIGHT) {
+                    fb[y * LCD_WIDTH + x] = COLOR_RED;
+                }
+            }
+        }
+        // Draw bank angle warning text on red background
+        char warn_buf[32];
+        snprintf(warn_buf, sizeof(warn_buf), "BANK %.0f", fabsf(roll));
+        lcd_draw_string_scaled(center_x - 48, LCD_HEIGHT - 30, warn_buf, COLOR_WHITE, COLOR_RED, 2);
+    }
 }
 
 // ===================== MAIN RUN FUNCTION (for menu integration) =====================

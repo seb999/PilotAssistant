@@ -20,7 +20,7 @@
 #define LED_PIN 25
 #define BUFFER_SIZE 1024
 
-// Telemetry data and state (used by RADAR and ATTITUDE)
+// Telemetry data and state (used by RADAR and GYRO)
 TelemetryData latest_telemetry;  // Non-static so attitude_indicator can access it
 bool telemetry_received = false;  // Non-static so attitude_indicator can access it
 static char rx_buffer[BUFFER_SIZE];
@@ -171,7 +171,7 @@ void read_telemetry_data() {
 }
 
 // Menu action functions removed: GO FLY, BLUETOOTH, GYRO OFFSET
-// Only RADAR and ATTITUDE remain
+// Only RADAR and GYRO remain
 
 // Helper function to convert lat/lon distance to pixels on radar
 void latlon_to_radar_xy(double own_lat, double own_lon, double ac_lat, double ac_lon,
@@ -312,7 +312,7 @@ void action_test_gyro(void) {
 // Menu items (UPPERCASE for font compatibility)
 static MenuItem menu_items[] = {
     {"RADAR", action_radar},
-    {"ATTITUDE", action_test_gyro}
+    {"GYRO", action_test_gyro}
 };
 
 int main() {
@@ -358,7 +358,7 @@ int main() {
     // Initialize menu
     printf("Initializing menu...\n");
     MenuState menu;
-    menu_init(&menu, menu_items, 2, NULL);  // 2 items: RADAR, ATTITUDE
+    menu_init(&menu, menu_items, 2, NULL);  // 2 items: RADAR, GYRO
 
     // Draw initial menu
     menu_draw_full(&menu);
