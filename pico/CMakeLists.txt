@@ -19,6 +19,7 @@ add_executable(menu_system
     menu.c
     telemetry_parser.c
     attitude_indicator.c
+    mag_calibration.c
     drivers/input_handler.c
     drivers/st7789_lcd.c
     drivers/icm20948_sensor.c
@@ -36,6 +37,8 @@ target_link_libraries(menu_system
     hardware_spi
     hardware_adc
     hardware_dma
+    hardware_flash
+    hardware_sync
     m  # Math library for cos, sin, etc.
 )
 

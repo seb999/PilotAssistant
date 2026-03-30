@@ -16,6 +16,7 @@
 #include "icm20948_sensor.h"
 #include "madgwick_filter.h"
 #include "attitude_indicator.h"
+#include "mag_calibration.h"
 
 #define LED_PIN 25
 #define BUFFER_SIZE 1024
@@ -309,10 +310,16 @@ void action_test_gyro(void) {
     attitude_indicator_run();
 }
 
+void action_hdg_setup(void) {
+    // Run magnetometer calibration
+    mag_calibration_run();
+}
+
 // Menu items (UPPERCASE for font compatibility)
 static MenuItem menu_items[] = {
     {"RADAR", action_radar},
-    {"GYRO", action_test_gyro}
+    {"ATTITUDE", action_test_gyro},
+    {"HDG SETUP", action_hdg_setup}
 };
 
 int main() {
@@ -358,7 +365,7 @@ int main() {
     // Initialize menu
     printf("Initializing menu...\n");
     MenuState menu;
-    menu_init(&menu, menu_items, 2, NULL);  // 2 items: RADAR, GYRO
+    menu_init(&menu, menu_items, 3, NULL);  // 3 items: RADAR, ATTITUDE, HDG SETUP
 
     // Draw initial menu
     menu_draw_full(&menu);
