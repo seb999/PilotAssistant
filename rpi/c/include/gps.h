@@ -18,6 +18,8 @@ typedef struct {
     float altitude_meters;  // Altitude in meters
     bool has_fix;           // GPS fix available
     int satellites;         // Number of satellites
+    float latitude;         // Latitude in decimal degrees
+    float longitude;        // Longitude in decimal degrees
 } GPSData;
 
 /**

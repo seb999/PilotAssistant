@@ -24,6 +24,7 @@
 #include <errno.h>
 #include <math.h>
 #include <time.h>
+#include <ctype.h>
 #include "../include/st7789_rpi.h"
 #include "../include/mpu6050.h"
 #include "../include/gps.h"
@@ -79,12 +80,19 @@ static bool filter_initialized = false;
 #define DISPLAY_UPDATE_MS 16    // ~60 FPS display refresh (smooth animation)
 #define GPS_UPDATE_MS 200       // 5 Hz update rate
 #define TELEMETRY_UPDATE_MS 3000  // Send telemetry to Pico every 3 seconds
+#define ARLANDA_LATITUDE 59.6519f
+#define ARLANDA_LONGITUDE 17.9186f
+#define TRAFFIC_UPDATE_MS 10000  // Refresh traffic every 10 seconds
+#define TRAFFIC_RADIUS_KM 25.0f
+#define MAX_TRAFFIC_AIRCRAFT 8
+#define TRAFFIC_JSON_SIZE 2048
+#define API_RESPONSE_SIZE 32768
 
 // Motion interpolation - smoothly interpolate between sensor readings
 #define INTERPOLATION_FACTOR 0.3f  // How quickly display catches up to sensor (0.3 = smooth but responsive)
 
 // GPS data
-static GPSData gps_data = {0.0f, 0.0f, false, 0};
+static GPSData gps_data = {0.0f, 0.0f, false, 0, 0.0f, 0.0f};
 
 // Attitude offsets for calibration
 static float pitch_offset = 0.0f;
@@ -92,6 +100,8 @@ static float roll_offset = 0.0f;
 
 // WiFi status
 static bool wifi_connected = false;
+static char traffic_json[TRAFFIC_JSON_SIZE] = "[]";
+static unsigned long last_traffic_update = 0;
 
 /**
  * Check if WiFi is connected by checking if wlan0 has an IP address
@@ -114,6 +124,312 @@ bool check_wifi_status(void)
 
     pclose(fp);
     return false;
+}
+
+static float haversine_km(float lat1, float lon1, float lat2, float lon2)
+{
+    const float earth_radius_km = 6371.0f;
+    float dlat = (lat2 - lat1) * 0.0174532925f;
+    float dlon = (lon2 - lon1) * 0.0174532925f;
+    float a = sinf(dlat * 0.5f) * sinf(dlat * 0.5f) +
+              cosf(lat1 * 0.0174532925f) * cosf(lat2 * 0.0174532925f) *
+                  sinf(dlon * 0.5f) * sinf(dlon * 0.5f);
+    float c = 2.0f * atan2f(sqrtf(a), sqrtf(1.0f - a));
+    return earth_radius_km * c;
+}
+
+static void trim_whitespace(char *s)
+{
+    if (!s || s[0] == '\0')
+    {
+        return;
+    }
+
+    char *start = s;
+    while (*start && isspace((unsigned char)*start))
+    {
+        start++;
+    }
+
+    char *end = start + strlen(start);
+    while (end > start && isspace((unsigned char)*(end - 1)))
+    {
+        end--;
+    }
+    *end = '\0';
+
+    if (start != s)
+    {
+        memmove(s, start, strlen(start) + 1);
+    }
+}
+
+static void trim_callsign(char *s)
+{
+    if (!s)
+    {
+        return;
+    }
+
+    trim_whitespace(s);
+    size_t len = strlen(s);
+    if (len >= 2 && s[0] == '"' && s[len - 1] == '"')
+    {
+        s[len - 1] = '\0';
+        memmove(s, s + 1, len - 1);
+    }
+    trim_whitespace(s);
+}
+
+static bool extract_state_field(const char *entry, int target_index, char *out, size_t out_size)
+{
+    if (!entry || !out || out_size == 0 || target_index < 0)
+    {
+        return false;
+    }
+
+    int field_index = 0;
+    const char *field_start = entry;
+    bool in_quotes = false;
+    bool escaped = false;
+
+    for (const char *p = entry;; p++)
+    {
+        char c = *p;
+        bool at_end = (c == '\0');
+        bool is_separator = (!in_quotes && c == ',');
+
+        if (!at_end)
+        {
+            if (escaped)
+            {
+                escaped = false;
+            }
+            else if (c == '\\')
+            {
+                escaped = true;
+            }
+            else if (c == '"')
+            {
+                in_quotes = !in_quotes;
+            }
+        }
+
+        if (is_separator || at_end)
+        {
+            if (field_index == target_index)
+            {
+                size_t len = (size_t)(p - field_start);
+                if (len >= out_size)
+                {
+                    len = out_size - 1;
+                }
+                memcpy(out, field_start, len);
+                out[len] = '\0';
+                trim_whitespace(out);
+                return (out[0] != '\0' && strcmp(out, "null") != 0);
+            }
+            if (at_end)
+            {
+                break;
+            }
+            field_index++;
+            field_start = p + 1;
+        }
+    }
+
+    return false;
+}
+
+static bool parse_float_field(const char *entry, int index, float *out_value)
+{
+    char field[64];
+    if (!extract_state_field(entry, index, field, sizeof(field)))
+    {
+        return false;
+    }
+
+    char *end_ptr = NULL;
+    float value = strtof(field, &end_ptr);
+    if (end_ptr == field)
+    {
+        return false;
+    }
+
+    *out_value = value;
+    return true;
+}
+
+static int fetch_traffic_from_opensky(float center_lat, float center_lon, float radius_km, char *out_json, size_t out_size)
+{
+    if (!out_json || out_size == 0)
+    {
+        return 0;
+    }
+
+    out_json[0] = '\0';
+
+    float delta_deg = radius_km / 111.0f;
+    char command[512];
+    snprintf(command, sizeof(command),
+             "curl -s --max-time 5 \"https://opensky-network.org/api/states/all?lamin=%.6f&lamax=%.6f&lomin=%.6f&lomax=%.6f\"",
+             center_lat - delta_deg, center_lat + delta_deg, center_lon - delta_deg, center_lon + delta_deg);
+
+    FILE *fp = popen(command, "r");
+    if (!fp)
+    {
+        snprintf(out_json, out_size, "[]");
+        return 0;
+    }
+
+    char response[API_RESPONSE_SIZE];
+    size_t used = 0;
+    while (used < sizeof(response) - 1)
+    {
+        size_t n = fread(response + used, 1, sizeof(response) - 1 - used, fp);
+        if (n == 0)
+        {
+            break;
+        }
+        used += n;
+    }
+    response[used] = '\0';
+    pclose(fp);
+
+    const char *states_key = strstr(response, "\"states\":");
+    if (!states_key)
+    {
+        snprintf(out_json, out_size, "[]");
+        return 0;
+    }
+
+    const char *states_start = strchr(states_key, '[');
+    if (!states_start)
+    {
+        snprintf(out_json, out_size, "[]");
+        return 0;
+    }
+
+    size_t out_used = 0;
+    out_used += snprintf(out_json + out_used, out_size - out_used, "[");
+
+    int aircraft_count = 0;
+    bool first = true;
+    int depth = 0;
+    const char *entry_start = NULL;
+
+    for (const char *p = states_start; *p != '\0'; p++)
+    {
+        if (*p == '[')
+        {
+            depth++;
+            if (depth == 2)
+            {
+                entry_start = p + 1;
+            }
+        }
+        else if (*p == ']')
+        {
+            if (depth == 2 && entry_start)
+            {
+                size_t entry_len = (size_t)(p - entry_start);
+                if (entry_len > 0 && entry_len < 2048)
+                {
+                    char entry[2048];
+                    memcpy(entry, entry_start, entry_len);
+                    entry[entry_len] = '\0';
+
+                    float lon = 0.0f;
+                    float lat = 0.0f;
+                    float heading = 0.0f;
+                    if (parse_float_field(entry, 5, &lon) &&
+                        parse_float_field(entry, 6, &lat) &&
+                        parse_float_field(entry, 10, &heading))
+                    {
+                        float dist = haversine_km(center_lat, center_lon, lat, lon);
+                        if (dist <= radius_km)
+                        {
+                            char callsign[64];
+                            if (!extract_state_field(entry, 1, callsign, sizeof(callsign)))
+                            {
+                                snprintf(callsign, sizeof(callsign), "N/A");
+                            }
+                            trim_callsign(callsign);
+                            if (callsign[0] == '\0')
+                            {
+                                snprintf(callsign, sizeof(callsign), "N/A");
+                            }
+
+                            float altitude = 0.0f;
+                            float velocity = 0.0f;
+                            parse_float_field(entry, 7, &altitude);
+                            parse_float_field(entry, 9, &velocity);
+                            int speed_knots = (int)(velocity * 1.94384f);
+
+                            int written = snprintf(out_json + out_used, out_size - out_used,
+                                                   "%s{\"callsign\":\"%s\",\"lat\":%.6f,\"lon\":%.6f,\"heading\":%.1f,\"altitude\":%.1f,\"speed_knots\":%d,\"distance_km\":%.2f}",
+                                                   first ? "" : ",",
+                                                   callsign,
+                                                   lat,
+                                                   lon,
+                                                   heading,
+                                                   altitude,
+                                                   speed_knots,
+                                                   dist);
+                            if (written <= 0 || (size_t)written >= out_size - out_used)
+                            {
+                                break;
+                            }
+                            out_used += (size_t)written;
+                            first = false;
+                            aircraft_count++;
+                            if (aircraft_count >= MAX_TRAFFIC_AIRCRAFT)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+                entry_start = NULL;
+            }
+            depth--;
+            if (depth <= 0)
+            {
+                break;
+            }
+        }
+    }
+
+    if (out_used < out_size - 2)
+    {
+        out_used += snprintf(out_json + out_used, out_size - out_used, "]");
+    }
+    else
+    {
+        snprintf(out_json, out_size, "[]");
+        return 0;
+    }
+
+    return aircraft_count;
+}
+
+static void update_traffic_cache(float center_lat, float center_lon, unsigned long current_time_ms)
+{
+    if (current_time_ms - last_traffic_update < TRAFFIC_UPDATE_MS)
+    {
+        return;
+    }
+    last_traffic_update = current_time_ms;
+
+    if (!wifi_connected)
+    {
+        snprintf(traffic_json, sizeof(traffic_json), "[]");
+        return;
+    }
+
+    int count = fetch_traffic_from_opensky(center_lat, center_lon, TRAFFIC_RADIUS_KM, traffic_json, sizeof(traffic_json));
+    printf("Traffic update: %d aircraft within %.0f km (lat=%.5f lon=%.5f)\n",
+           count, TRAFFIC_RADIUS_KM, center_lat, center_lon);
 }
 
 // Signal handler for Ctrl+C
@@ -628,16 +944,27 @@ void send_telemetry_to_pico(void)
     float bank_limit = (gps_data.speed_knots <= 85.0f) ? 20.0f : 30.0f;
     bool bank_warning = fabs(attitude.roll) > bank_limit;
     bool pitch_warning = fabs(attitude.pitch) > 20.0f;
+    float telemetry_lat = gps_data.has_fix ? gps_data.latitude : ARLANDA_LATITUDE;
+    float telemetry_lon = gps_data.has_fix ? gps_data.longitude : ARLANDA_LONGITUDE;
+    float telemetry_alt = gps_data.has_fix ? gps_data.altitude_meters : 0.0f;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    unsigned long now_ms = ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    update_traffic_cache(telemetry_lat, telemetry_lon, now_ms);
 
     // Build JSON telemetry string
-    char telemetry[512];
+    char telemetry[4096];
     snprintf(telemetry, sizeof(telemetry),
-             "{\"own\":{\"lat\":0.0,\"lon\":0.0,\"alt\":0.0,\"pitch\":%.1f,\"roll\":%.1f,\"yaw\":0.0},"
-             "\"traffic\":[],"
+             "{\"own\":{\"lat\":%.6f,\"lon\":%.6f,\"alt\":%.1f,\"pitch\":%.1f,\"roll\":%.1f,\"yaw\":0.0},"
+             "\"traffic\":%s,"
              "\"status\":{\"wifi\":%s,\"gps\":%s,\"bluetooth\":false},"
              "\"warnings\":{\"bank\":%s,\"pitch\":%s}}\n",
+             telemetry_lat,
+             telemetry_lon,
+             telemetry_alt,
              attitude.pitch,
              attitude.roll,
+             traffic_json,
              wifi_connected ? "true" : "false",
              gps_data.has_fix ? "true" : "false",
              bank_warning ? "true" : "false",
@@ -654,6 +981,7 @@ void send_telemetry_to_pico(void)
            bank_limit,
            pitch_warning ? "ACTIVE" : "off");
     printf("  Speed: %.1f knots\n", gps_data.speed_knots);
+    printf("  JSON: %s", telemetry);
 
     // Send to Pico via serial
     write(serial_fd, telemetry, strlen(telemetry));

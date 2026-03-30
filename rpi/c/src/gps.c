@@ -20,6 +20,7 @@ static int gpio_export(int pin);
 static int gpio_set_direction(int pin, const char *direction);
 static int gpio_set_value(int pin, int value);
 static int parse_nmea_sentence(const char *sentence, GPSData *gps_data);
+static bool parse_nmea_coordinate(const char *coord, const char *hemisphere, float *out_deg);
 
 /**
  * Export GPIO pin
@@ -124,6 +125,31 @@ int gps_init(void) {
 }
 
 /**
+ * Parse NMEA coordinate (ddmm.mmmm or dddmm.mmmm) to decimal degrees
+ */
+static bool parse_nmea_coordinate(const char *coord, const char *hemisphere, float *out_deg) {
+    if (!coord || !hemisphere || !out_deg || strlen(coord) == 0 || strlen(hemisphere) == 0) {
+        return false;
+    }
+
+    float raw = atof(coord);
+    if (raw <= 0.0f) {
+        return false;
+    }
+
+    int degrees = (int)(raw / 100.0f);
+    float minutes = raw - (degrees * 100.0f);
+    float decimal = degrees + (minutes / 60.0f);
+
+    if (hemisphere[0] == 'S' || hemisphere[0] == 'W') {
+        decimal = -decimal;
+    }
+
+    *out_deg = decimal;
+    return true;
+}
+
+/**
  * Parse NMEA sentence
  */
 static int parse_nmea_sentence(const char *sentence, GPSData *gps_data) {
@@ -151,6 +177,16 @@ static int parse_nmea_sentence(const char *sentence, GPSData *gps_data) {
             // Field 9: Altitude in meters
             if (strlen(tokens[9]) > 0) {
                 gps_data->altitude_meters = atof(tokens[9]);
+            }
+
+            // Fields 2-5: Latitude and longitude
+            float lat = 0.0f;
+            float lon = 0.0f;
+            bool lat_ok = parse_nmea_coordinate(tokens[2], tokens[3], &lat);
+            bool lon_ok = parse_nmea_coordinate(tokens[4], tokens[5], &lon);
+            if (lat_ok && lon_ok) {
+                gps_data->latitude = lat;
+                gps_data->longitude = lon;
             }
         }
 
