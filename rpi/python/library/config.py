@@ -58,6 +58,10 @@ DEBUG_MODE     = True  # Set to True to use Stockholm coordinates instead of rea
 DEBUG_LATITUDE = 59.3293  # Stockholm coordinates
 DEBUG_LONGITUDE = 18.0686
 
+# OpenSky Network API credentials
+OPENSKY_CLIENT_ID     = "dubosse-api-client"
+OPENSKY_CLIENT_SECRET = "0IwhG4V5nTbGNJpy5IR95lEHjtPYDVV3"
+
 class RaspberryPi:
     def __init__(self,spi=spidev.SpiDev(0,0),spi_freq=40000000,rst = 27,dc = 25,bl = 24,bl_freq=1000,i2c=None,i2c_freq=100000):
         self.np=np

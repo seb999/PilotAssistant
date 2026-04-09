@@ -7,7 +7,7 @@ from math import sin, cos, sqrt, atan2, radians
 
 # Import debug configuration
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'library'))
-from library.config import DEBUG_MODE, DEBUG_LATITUDE, DEBUG_LONGITUDE
+from library.config import DEBUG_MODE, DEBUG_LATITUDE, DEBUG_LONGITUDE, OPENSKY_CLIENT_ID, OPENSKY_CLIENT_SECRET
 
 # Traffic service configuration
 AIRCRAFT_RANGE_KM = 25      # Radius in km to search for aircraft (good for Cessna at 100kts)
@@ -38,7 +38,7 @@ class TrafficService:
         try:
             delta_deg = radius_km / 111  # Rough approximation
             url = f"https://opensky-network.org/api/states/all?lamin={lat - delta_deg}&lamax={lat + delta_deg}&lomin={lon - delta_deg}&lomax={lon + delta_deg}"
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, auth=(OPENSKY_CLIENT_ID, OPENSKY_CLIENT_SECRET), timeout=10)
             
             # Check if response has content
             if not response.text.strip():
