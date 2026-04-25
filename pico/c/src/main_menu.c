@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <math.h>
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
@@ -12,6 +13,7 @@
 #include "img/splash_data.h"
 #include "input_handler.h"
 #include "menu.h"
+#include "xpt2046_touch.h"
 #include "telemetry_parser.h"
 #include "icm20948_sensor.h"
 #include "madgwick_filter.h"
@@ -24,20 +26,6 @@ static TelemetryData latest_telemetry;
 static bool telemetry_received = false;
 static char rx_buffer[BUFFER_SIZE];
 static size_t rx_index = 0;
-
-// Track button release events for USB command sending
-typedef struct {
-    bool key1_was_pressed;
-    bool key2_was_pressed;
-    bool key4_was_pressed;
-    bool press_was_pressed;
-    bool up_was_pressed;
-    bool down_was_pressed;
-    bool left_was_pressed;
-    bool right_was_pressed;
-} ButtonReleaseTracker;
-
-static ButtonReleaseTracker release_tracker = {0};
 
 // Status ribbon state tracking (to avoid unnecessary redraws)
 typedef struct {
@@ -429,6 +417,133 @@ void action_radar(void) {
     }
 }
 
+// ── Attitude indicator helpers ────────────────────────────────────────────────
+
+static void ai_draw_bg(float roll_rad, float pitch_px) {
+    const int16_t cx = 160, cy = 120;
+    float cos_r = cosf(roll_rad);
+    float sin_r = sinf(roll_rad);
+    for (int16_t y = 0; y < LCD_HEIGHT; y++) {
+        float dy = (float)(y - cy) + pitch_px;
+        if (fabsf(sin_r) < 0.01f) {
+            lcd_fill_rect(0, y, LCD_WIDTH, 1, (dy < 0) ? COLOR_SKY : COLOR_BROWN);
+        } else {
+            int16_t xc = cx - (int16_t)(dy * cos_r / sin_r);
+            float tl = cos_r * dy + sin_r * (float)(0 - cx);
+            uint16_t lc = (tl < 0) ? COLOR_SKY : COLOR_BROWN;
+            uint16_t rc = (tl < 0) ? COLOR_BROWN : COLOR_SKY;
+            if      (xc <= 0)          lcd_fill_rect(0,  y, LCD_WIDTH,      1, rc);
+            else if (xc >= LCD_WIDTH)  lcd_fill_rect(0,  y, LCD_WIDTH,      1, lc);
+            else {
+                lcd_fill_rect(0,  y, xc,             1, lc);
+                lcd_fill_rect(xc, y, LCD_WIDTH - xc, 1, rc);
+            }
+        }
+    }
+}
+
+static void ai_draw_pitch_ladder(float roll_rad, float pitch) {
+    const int16_t cx = 160, cy = 120;
+    const float PX_PER_DEG = 2.5f;
+    float cos_r = cosf(roll_rad);
+    float sin_r = sinf(roll_rad);
+    for (int pm = -60; pm <= 60; pm += 10) {
+        float dym = ((float)pm - pitch) * PX_PER_DEG;
+        float scx = (float)cx - sin_r * dym;
+        float scy = (float)cy + cos_r * dym;
+        if (scy < 5.0f || scy >= (LCD_HEIGHT - 20)) continue;
+        float hw = (pm == 0) ? 55.0f : (pm % 20 == 0) ? 35.0f : 22.0f;
+        int16_t x1 = (int16_t)(scx - cos_r * hw), y1 = (int16_t)(scy - sin_r * hw);
+        int16_t x2 = (int16_t)(scx + cos_r * hw), y2 = (int16_t)(scy + sin_r * hw);
+        lcd_draw_line(x1, y1, x2, y2, COLOR_WHITE);
+        if (pm == 0) lcd_draw_line(x1, y1+1, x2, y2+1, COLOR_WHITE);
+        if (pm != 0 && pm % 20 == 0) {
+            char lbl[5];
+            snprintf(lbl, sizeof(lbl), "%d", abs(pm));
+            int16_t lx = x1 - 18;
+            if (lx < 0) lx = 0;
+            lcd_draw_string(lx, y1 - 3, lbl, COLOR_WHITE, COLOR_BLACK);
+        }
+    }
+}
+
+static void ai_draw_bank_arc(float roll) {
+    // Arc: center at (160, -70) off top of screen, radius 100
+    const float ACX = 160.0f, ACY = -70.0f, ACR = 100.0f;
+    const float D2R = (float)M_PI / 180.0f;
+    const int ticks[] = {-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60};
+    for (int i = 0; i < 11; i++) {
+        float ang = (float)ticks[i] * D2R;
+        float nx = sinf(ang), ny = cosf(ang);
+        float ax = ACX + ACR * nx, ay = ACY + ACR * ny;
+        if (ay < 0.0f || ay >= LCD_HEIGHT) continue;
+        float tlen = (ticks[i] % 30 == 0) ? 10.0f : 6.0f;
+        lcd_draw_line((int16_t)ax, (int16_t)ay,
+                      (int16_t)(ax + nx * tlen), (int16_t)(ay + ny * tlen),
+                      COLOR_WHITE);
+    }
+    // Roll pointer: filled yellow triangle at current bank angle
+    float ang = roll * D2R;
+    float nx = sinf(ang), ny = cosf(ang);
+    float tx = cosf(ang), ty = -sinf(ang);
+    float bx = ACX + ACR * nx, by = ACY + ACR * ny;
+    if (by >= 0.0f && by < LCD_HEIGHT) {
+        int16_t ax = (int16_t)bx,  ay = (int16_t)by;
+        int16_t b1x = (int16_t)(bx + nx*11.0f + tx*5.5f);
+        int16_t b1y = (int16_t)(by + ny*11.0f + ty*5.5f);
+        int16_t b2x = (int16_t)(bx + nx*11.0f - tx*5.5f);
+        int16_t b2y = (int16_t)(by + ny*11.0f - ty*5.5f);
+        lcd_draw_line(ax, ay, b1x, b1y, COLOR_YELLOW);
+        lcd_draw_line(ax, ay, b2x, b2y, COLOR_YELLOW);
+        lcd_draw_line(b1x, b1y, b2x, b2y, COLOR_YELLOW);
+    }
+}
+
+void action_attitude_simulated(void) {
+    const int16_t cx = 160, cy = 120;
+    const float PX_PER_DEG = 2.5f;
+    const float D2R = (float)M_PI / 180.0f;
+    float sim_time = 0.0f;
+    InputState input_state = {0};
+    bool was_touched = false;
+
+    while (true) {
+        input_read(&input_state);
+        if (input_just_pressed_key2(&input_state)) break;
+
+        uint16_t tx, ty;
+        bool touched = touch_read(&tx, &ty);
+        if (touched && !was_touched) break;
+        was_touched = touched;
+
+        float roll  = 35.0f * sinf(sim_time * 0.35f);
+        float pitch = 12.0f * sinf(sim_time * 0.22f);
+        sim_time += 0.05f;
+
+        ai_draw_bg(roll * D2R, pitch * PX_PER_DEG);
+        ai_draw_pitch_ladder(roll * D2R, pitch);
+        ai_draw_bank_arc(roll);
+
+        // Fixed aircraft symbol
+        lcd_draw_line(cx-40, cy,   cx-10, cy,   COLOR_YELLOW);
+        lcd_draw_line(cx-40, cy+1, cx-10, cy+1, COLOR_YELLOW);
+        lcd_draw_line(cx+10, cy,   cx+40, cy,   COLOR_YELLOW);
+        lcd_draw_line(cx+10, cy+1, cx+40, cy+1, COLOR_YELLOW);
+        lcd_fill_rect(cx-4, cy-4, 9, 9, COLOR_YELLOW);
+
+        // Readouts at bottom
+        char buf[20];
+        lcd_fill_rect(0, 222, 320, 18, COLOR_BLACK);
+        snprintf(buf, sizeof(buf), "BNK%+.0f", roll);
+        lcd_draw_string(4, 226, buf, COLOR_YELLOW, COLOR_BLACK);
+        snprintf(buf, sizeof(buf), "PIT%+.0f", pitch);
+        lcd_draw_string(248, 226, buf, COLOR_YELLOW, COLOR_BLACK);
+
+        lcd_flush();
+        sleep_ms(50);
+    }
+}
+
 void action_test_gyro(void) {
     printf("=== AHRS ATTITUDE INDICATOR selected ===\n");
 
@@ -666,13 +781,19 @@ void action_test_gyro(void) {
     }
 }
 
-// Menu items (UPPERCASE for font compatibility)
+// Icon colors (iOS-style palette)
+#define ICON_COLOR_FLY   0x041F  // vivid blue
+#define ICON_COLOR_BT    0x601F  // indigo
+#define ICON_COLOR_GYRO  0xFD20  // amber
+#define ICON_COLOR_RADAR 0x07C0  // green
+#define ICON_COLOR_ATT   0xC00F  // purple
+
 static MenuItem menu_items[] = {
-    {"GO FLY", action_go_fly},
-    {"BLUETOOTH", action_bluetooth},
-    {"GYRO OFFSET", action_gyro_offset},
-    {"RADAR", action_radar},
-    {"TEST GYRO", action_test_gyro}
+    {"FLY",      ICON_COLOR_FLY,   action_go_fly},
+    {"BLUETOOTH",ICON_COLOR_BT,    action_bluetooth},
+    {"GYRO",     ICON_COLOR_GYRO,  action_gyro_offset},
+    {"RADAR",    ICON_COLOR_RADAR, action_radar},
+    {"ATTITUDE", ICON_COLOR_ATT,   action_attitude_simulated}
 };
 
 int main() {
@@ -710,122 +831,34 @@ int main() {
     }
     sleep_ms(1400);  // Total 2 seconds for splash
 
-    // Initialize input handler
-    printf("Initializing input handler...\n");
-    input_init();
-    printf("Input handler ready\n");
+    // Initialize touch (joystick replaced by touchscreen)
+    touch_init();
 
-    // Initialize menu
-    printf("Initializing menu...\n");
-    MenuState menu;
-    menu_init(&menu, menu_items, 5, NULL);  // 5 items: GO FLY, BLUETOOTH, GYRO OFFSET, RADAR, TEST GYRO
+    // Draw initial icon menu
+    icon_menu_draw(menu_items, ICON_COUNT);
+    printf("Icon menu displayed\n\n");
 
-    // Draw initial menu
-    menu_draw_full(&menu);
-    printf("Menu displayed\n\n");
+    bool was_touched = false;
 
-    // Input state
-    InputState input_state = {0};
-
-    // Main loop
+    // Main loop — touch only, no joystick
     while (true) {
-        // Read inputs
-        input_read(&input_state);
-
-        // --- Send Button Press Commands to Raspberry Pi ---
-        if (input_just_pressed_key1(&input_state)) {
-            send_button_command(1, "PRESS");
-            send_high_level_command("FLY_MODE");
-            release_tracker.key1_was_pressed = true;
-        }
-
-        if (input_just_pressed_key2(&input_state)) {
-            send_button_command(2, "PRESS");
-            send_high_level_command("GYRO_CALIBRATION");
-            release_tracker.key2_was_pressed = true;
-        }
-
-        if (input_just_pressed_key4(&input_state)) {
-            send_button_command(4, "PRESS");
-            send_high_level_command("BLUETOOTH");
-            release_tracker.key4_was_pressed = true;
-        }
-
-        if (input_just_pressed_press(&input_state)) {
-            send_button_command(5, "PRESS");
-            release_tracker.press_was_pressed = true;
-        }
-
-        // --- Send Button Release Commands ---
-        if (release_tracker.key1_was_pressed && !input_state.key1) {
-            send_button_command(1, "RELEASE");
-            release_tracker.key1_was_pressed = false;
-        }
-
-        if (release_tracker.key2_was_pressed && !input_state.key2) {
-            send_button_command(2, "RELEASE");
-            release_tracker.key2_was_pressed = false;
-        }
-
-        if (release_tracker.key4_was_pressed && !input_state.key4) {
-            send_button_command(4, "RELEASE");
-            release_tracker.key4_was_pressed = false;
-        }
-
-        if (release_tracker.press_was_pressed && !input_state.press) {
-            send_button_command(5, "RELEASE");
-            release_tracker.press_was_pressed = false;
-        }
-
-        // --- Send Joystick Commands ---
-        if (input_just_pressed_up(&input_state)) {
-            send_joystick_command("UP");
-            release_tracker.up_was_pressed = true;
-        }
-
-        if (input_just_pressed_down(&input_state)) {
-            send_joystick_command("DOWN");
-            release_tracker.down_was_pressed = true;
-        }
-
-        if (input_just_pressed_left(&input_state)) {
-            send_joystick_command("LEFT");
-            release_tracker.left_was_pressed = true;
-        }
-
-        if (input_just_pressed_right(&input_state)) {
-            send_joystick_command("RIGHT");
-            release_tracker.right_was_pressed = true;
-        }
-
-        // --- Joystick Release (optional, for future use) ---
-        if (release_tracker.up_was_pressed && !input_state.up) {
-            release_tracker.up_was_pressed = false;
-        }
-
-        if (release_tracker.down_was_pressed && !input_state.down) {
-            release_tracker.down_was_pressed = false;
-        }
-
-        if (release_tracker.left_was_pressed && !input_state.left) {
-            release_tracker.left_was_pressed = false;
-        }
-
-        if (release_tracker.right_was_pressed && !input_state.right) {
-            release_tracker.right_was_pressed = false;
-        }
-
-        // Read telemetry data from Raspberry Pi
         read_telemetry_data();
 
-        // Handle menu navigation
-        if (menu_handle_input(&menu, &input_state)) {
-            // An action was selected and executed
-            // Redraw the menu after action completes
-            menu_draw_full(&menu);
+        // Tap an icon (rising edge only)
+        uint16_t tx, ty;
+        bool touched = touch_read(&tx, &ty);
+        if (touched && !was_touched) {
+            int idx = icon_menu_hit_test(tx, ty);
+            printf("TOUCH x=%d y=%d -> icon=%d\n", tx, ty, idx);
+            if (idx >= 0) {
+                icon_menu_flash(idx);
+                menu_items[idx].action();
+                icon_menu_draw(menu_items, ICON_COUNT);
+            }
         }
+        was_touched = touched;
 
-        // Update status ribbon periodically (every 100ms)
+        // Update status ribbon every 100 ms
         static uint32_t last_ribbon_update = 0;
         uint32_t now = to_ms_since_boot(get_absolute_time());
         if (now - last_ribbon_update >= 100) {
@@ -833,7 +866,6 @@ int main() {
             last_ribbon_update = now;
         }
 
-        // Small delay
         sleep_ms(10);
     }
 

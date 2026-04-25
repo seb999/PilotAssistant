@@ -13,7 +13,7 @@ pico_sdk_init()
 # NOTE: Old pico_telemetry_receiver removed - we only use menu_system now
 
 # Include directories
-include_directories(src drivers)
+include_directories(src drivers . assets)
 
 # Input test executable
 add_executable(input_test
@@ -43,6 +43,7 @@ add_executable(menu_system
     drivers/st7789_lcd.c
     drivers/icm20948_sensor.c
     drivers/madgwick_filter.c
+    drivers/xpt2046_touch.c
 )
 
 target_link_libraries(menu_system
@@ -57,6 +58,24 @@ target_link_libraries(menu_system
 pico_enable_stdio_usb(menu_system 1)
 pico_enable_stdio_uart(menu_system 0)
 pico_add_extra_outputs(menu_system)
+
+# Touch screen test executable
+add_executable(touch_test
+    src/main_touch_test.c
+    drivers/st7789_lcd.c
+    drivers/xpt2046_touch.c
+)
+
+target_link_libraries(touch_test
+    pico_stdlib
+    hardware_gpio
+    hardware_spi
+    hardware_dma
+)
+
+pico_enable_stdio_usb(touch_test 1)
+pico_enable_stdio_uart(touch_test 0)
+pico_add_extra_outputs(touch_test)
 
 # Command sender executable (sends button/joystick commands to Raspberry Pi)
 add_executable(command_sender

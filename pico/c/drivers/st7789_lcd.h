@@ -22,12 +22,14 @@
 #define COLOR_BROWN   0x8200  // Brown for ground (RGB565)
 #define COLOR_SKY     0x039F  // Sky blue (RGB565)
 
-// Pin definitions for Waveshare 1.3" LCD
+// Pin definitions
+// NOTE: GP12 = SPI1 MISO (needed for XPT2046 touch readback), RST moved to GP15
 #define LCD_DC_PIN   8
 #define LCD_CS_PIN   9
 #define LCD_SCK_PIN  10
 #define LCD_MOSI_PIN 11
-#define LCD_RST_PIN  12
+#define LCD_MISO_PIN 12
+#define LCD_RST_PIN  15
 #define LCD_BL_PIN   13
 
 // Initialize the LCD
@@ -77,5 +79,8 @@ void lcd_draw_bitmap_transparent(uint16_t x, uint16_t y, uint16_t width, uint16_
 void lcd_draw_circle(uint16_t x0, uint16_t y0, uint16_t radius, uint16_t color);
 void lcd_draw_pixel(uint16_t x, uint16_t y, uint16_t color);
 void lcd_draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color);
+
+// Draw a filled rounded rectangle
+void lcd_fill_round_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t r, uint16_t color);
 
 #endif // ST7789_LCD_H

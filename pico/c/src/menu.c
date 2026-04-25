@@ -1,149 +1,118 @@
 #include "menu.h"
-#include <stdio.h>
+#include "pico/stdlib.h"
 #include <string.h>
 
-// Menu item positions for 320x240 display (below status ribbon)
-// Status ribbon is 28px high, menu starts at y=30
-// Each item: x, y, width, height
-static const MenuRect default_positions[] = {
-    {5, 32, 310, 35},   // Go Fly
-    {5, 72, 310, 35},   // Bluetooth
-    {5, 112, 310, 35},  // Gyro Offset
-    {5, 152, 310, 35},  // Radar
-    {5, 192, 310, 35}   // Test Gyro
+// Row 1: 3 icons  (y=48)  — centers at x=53,160,267
+// Row 2: 2 icons  (y=148) — centers at x=107,213
+const uint16_t icon_x[ICON_COUNT] = {23, 130, 237, 77, 183};
+const uint16_t icon_y[ICON_COUNT] = {48, 48,  48, 148, 148};
+
+// ── Icon symbol drawing (white, inside the 60×60 box) ────────────────────────
+
+static void draw_sym_fly(uint16_t ix, uint16_t iy) {
+    // Upward arrow: arrowhead + shaft
+    uint16_t cx = ix + 29;
+    for (int d = 0; d < 13; d++)
+        lcd_fill_rect(cx - d, iy + 9 + d, 2*d + 2, 2, COLOR_WHITE);
+    lcd_fill_rect(cx - 5, iy + 34, 12, 15, COLOR_WHITE);
+}
+
+static void draw_sym_bluetooth(uint16_t ix, uint16_t iy) {
+    // Bluetooth rune: vertical bar + upper-right chevron + lower-left chevron
+    uint16_t cx = ix + 30;
+    lcd_fill_rect(cx - 1, iy + 10, 3, 40, COLOR_WHITE);
+    // Upper chevron (points right)
+    lcd_draw_line(cx, iy + 12, cx + 13, iy + 22, COLOR_WHITE);
+    lcd_draw_line(cx + 13, iy + 22, cx, iy + 32, COLOR_WHITE);
+    // Lower chevron (points left)
+    lcd_draw_line(cx, iy + 32, cx - 13, iy + 42, COLOR_WHITE);
+    lcd_draw_line(cx - 13, iy + 42, cx, iy + 52, COLOR_WHITE);
+}
+
+static void draw_sym_gyro(uint16_t ix, uint16_t iy) {
+    // Octagon outline + crosshair — scaled to 34×34 within the icon
+    uint16_t bx = ix + 13, by = iy + 13;
+    lcd_fill_rect(bx + 8,  by,      18, 3,  COLOR_WHITE);  // top
+    lcd_fill_rect(bx + 8,  by + 31, 18, 3,  COLOR_WHITE);  // bottom
+    lcd_fill_rect(bx,      by + 8,  3,  18, COLOR_WHITE);  // left
+    lcd_fill_rect(bx + 31, by + 8,  3,  18, COLOR_WHITE);  // right
+    lcd_fill_rect(bx + 4,  by + 4,  5,  5,  COLOR_WHITE);  // TL corner
+    lcd_fill_rect(bx + 25, by + 4,  5,  5,  COLOR_WHITE);  // TR corner
+    lcd_fill_rect(bx + 4,  by + 25, 5,  5,  COLOR_WHITE);  // BL corner
+    lcd_fill_rect(bx + 25, by + 25, 5,  5,  COLOR_WHITE);  // BR corner
+    lcd_fill_rect(bx + 10, by + 15, 14, 4,  COLOR_WHITE);  // horizontal
+    lcd_fill_rect(bx + 15, by + 10, 4,  14, COLOR_WHITE);  // vertical
+}
+
+static void draw_sym_radar(uint16_t ix, uint16_t iy) {
+    uint16_t cx = ix + 30, cy = iy + 34;
+    lcd_draw_circle(cx, cy, 8,  COLOR_WHITE);
+    lcd_draw_circle(cx, cy, 16, COLOR_WHITE);
+    lcd_draw_circle(cx, cy, 22, COLOR_WHITE);
+    lcd_draw_line(cx, cy, cx + 17, cy - 14, COLOR_WHITE);  // sweep line
+    lcd_fill_rect(cx - 2, cy - 2, 5, 5, COLOR_WHITE);      // center dot
+}
+
+static void draw_sym_attitude(uint16_t ix, uint16_t iy) {
+    uint16_t cx = ix + 30, cy = iy + 30;
+    lcd_draw_circle(cx, cy, 22, COLOR_WHITE);
+    lcd_fill_rect(cx - 18, cy - 1, 36, 3, COLOR_WHITE);     // horizon line
+    lcd_fill_rect(cx - 13, cy - 2, 9,  3, COLOR_WHITE);     // left wing
+    lcd_fill_rect(cx + 5,  cy - 2, 9,  3, COLOR_WHITE);     // right wing
+    lcd_fill_rect(cx - 2,  cy - 5, 5,  5, COLOR_WHITE);     // fuselage dot
+}
+
+typedef void (*SymDrawFn)(uint16_t, uint16_t);
+static const SymDrawFn sym_fns[ICON_COUNT] = {
+    draw_sym_fly, draw_sym_bluetooth, draw_sym_gyro,
+    draw_sym_radar, draw_sym_attitude
 };
 
-void menu_init(MenuState* menu, MenuItem* items, int count, MenuRect* positions) {
-    menu->items = items;
-    menu->item_count = count;
-    menu->selection_index = -1;  // No selection initially
-    menu->last_selection_index = -2;
-    menu->positions = positions ? positions : (MenuRect*)default_positions;
+// ── Public API ────────────────────────────────────────────────────────────────
+
+static void draw_icon(MenuItem* item, int index) {
+    uint16_t ix = icon_x[index], iy = icon_y[index];
+
+    // Colored rounded background
+    lcd_fill_round_rect(ix, iy, ICON_SIZE, ICON_SIZE, ICON_RADIUS, item->bg_color);
+
+    // White symbol
+    sym_fns[index](ix, iy);
+
+    // Label centered below icon (white on black)
+    const char* lbl = item->label;
+    int len = strlen(lbl);
+    int lx  = (int)ix + (ICON_SIZE - len * 6) / 2;
+    if (lx < 0) lx = 0;
+    lcd_draw_string(lx, iy + ICON_SIZE + 3, lbl, COLOR_WHITE, COLOR_BLACK);
 }
 
-// Draw icon: Gyro/calibration
-void menu_draw_icon_gyro(uint16_t x, uint16_t y, uint16_t color) {
-    // Outer circle (as octagon)
-    lcd_fill_rect(x + 4, y, 12, 2, color);      // Top
-    lcd_fill_rect(x + 4, y + 18, 12, 2, color);  // Bottom
-    lcd_fill_rect(x, y + 4, 2, 12, color);      // Left
-    lcd_fill_rect(x + 18, y + 4, 2, 12, color);  // Right
-    lcd_fill_rect(x + 2, y + 2, 2, 2, color);   // Corners
-    lcd_fill_rect(x + 16, y + 2, 2, 2, color);
-    lcd_fill_rect(x + 2, y + 16, 2, 2, color);
-    lcd_fill_rect(x + 16, y + 16, 2, 2, color);
+void icon_menu_draw(MenuItem* items, int count) {
+    lcd_clear(COLOR_BLACK);
 
-    // Center crosshair
-    lcd_fill_rect(x + 7, y + 9, 6, 2, color);  // Horizontal
-    lcd_fill_rect(x + 9, y + 7, 2, 6, color);  // Vertical
-}
-
-// Forward declarations for status ribbon (defined in main_menu.c)
-extern void draw_status_icons(void);
-extern void draw_ribbon_force(void);  // Force redraw without state check
-
-// Draw a single menu item
-void menu_draw_item(MenuState* menu, int index, bool selected) {
-    if (index < 0 || index >= menu->item_count) return;
-
-    MenuRect rect = menu->positions[index];
-    const char* label = menu->items[index].label;
-
-    if (selected) {
-        // Selected: ORANGE background with BLACK text
-        lcd_fill_rect(rect.x, rect.y, rect.width, rect.height, MENU_COLOR_ORANGE);
-
-        // Draw text (left-aligned, vertically centered, scale=3)
-        uint16_t text_y = rect.y + 8;  // Approximate vertical center for text
-        lcd_draw_string_scaled(rect.x + 10, text_y, label, MENU_COLOR_BLACK, MENU_COLOR_ORANGE, 3);
-
-    } else {
-        // Unselected: BLACK background with ORANGE text
-        lcd_fill_rect(rect.x, rect.y, rect.width, rect.height, MENU_COLOR_BLACK);
-
-        // Draw text (left-aligned, scale=3)
-        uint16_t text_y = rect.y + 8;
-        lcd_draw_string_scaled(rect.x + 10, text_y, label, MENU_COLOR_ORANGE, MENU_COLOR_BLACK, 3);
-    }
-}
-
-// Draw full menu (all items)
-void menu_draw_full(MenuState* menu) {
-    // Clear screen
-    lcd_clear(MENU_COLOR_BLACK);
-
-    // Force draw status ribbon at top (always show immediately when menu appears)
+    extern void draw_ribbon_force(void);
     draw_ribbon_force();
 
-    // Draw all menu items
-    for (int i = 0; i < menu->item_count; i++) {
-        menu_draw_item(menu, i, i == menu->selection_index);
-    }
+    for (int i = 0; i < count && i < ICON_COUNT; i++)
+        draw_icon(&items[i], i);
 
-    menu->last_selection_index = menu->selection_index;
     lcd_flush();
 }
 
-// Update selection (partial redraw)
-void menu_update_selection(MenuState* menu) {
-    // Only update if selection changed
-    if (menu->selection_index == menu->last_selection_index) {
-        return;
+int icon_menu_hit_test(uint16_t tx, uint16_t ty) {
+    for (int i = 0; i < ICON_COUNT; i++) {
+        if (tx >= icon_x[i] && tx < icon_x[i] + ICON_SIZE &&
+            ty >= icon_y[i] && ty < icon_y[i] + ICON_SIZE)
+            return i;
     }
-
-    // Redraw previously selected item as unselected
-    if (menu->last_selection_index >= 0 && menu->last_selection_index < menu->item_count) {
-        menu_draw_item(menu, menu->last_selection_index, false);
-    }
-
-    // Redraw newly selected item as selected
-    if (menu->selection_index >= 0 && menu->selection_index < menu->item_count) {
-        menu_draw_item(menu, menu->selection_index, true);
-    }
-
-    menu->last_selection_index = menu->selection_index;
-    lcd_flush();
+    return -1;
 }
 
-// Handle input navigation
-bool menu_handle_input(MenuState* menu, InputState* input) {
-    bool action_selected = false;
-
-    // DOWN - move selection down
-    if (input_just_pressed_down(input)) {
-        if (menu->selection_index == -1) {
-            menu->selection_index = 0;  // Start at first item
-        } else {
-            menu->selection_index = (menu->selection_index + 1) % menu->item_count;
-        }
-        menu_update_selection(menu);
-        printf("Menu: DOWN - selection=%d\n", menu->selection_index);
-    }
-
-    // UP - move selection up
-    if (input_just_pressed_up(input)) {
-        if (menu->selection_index == -1) {
-            menu->selection_index = menu->item_count - 1;  // Start at last item
-        } else {
-            menu->selection_index = (menu->selection_index - 1 + menu->item_count) % menu->item_count;
-        }
-        menu_update_selection(menu);
-        printf("Menu: UP - selection=%d\n", menu->selection_index);
-    }
-
-    // RIGHT or PRESS - execute selected item
-    if ((input_just_pressed_right(input) || input_just_pressed_press(input))
-        && menu->selection_index >= 0) {
-        printf("Menu: SELECTED item %d: %s\n", menu->selection_index,
-               menu->items[menu->selection_index].label);
-
-        // Execute action if it exists
-        if (menu->items[menu->selection_index].action != NULL) {
-            menu->items[menu->selection_index].action();
-        }
-
-        action_selected = true;
-    }
-
-    return action_selected;
+void icon_menu_flash(int index) {
+    if (index < 0 || index >= ICON_COUNT) return;
+    uint16_t ix = icon_x[index], iy = icon_y[index];
+    // Brief white highlight border
+    lcd_fill_round_rect(ix - 3, iy - 3, ICON_SIZE + 6, ICON_SIZE + 6, ICON_RADIUS + 2, COLOR_WHITE);
+    lcd_flush_rect(ix - 3, iy - 3, ICON_SIZE + 6, ICON_SIZE + 6);
+    sleep_ms(80);
 }

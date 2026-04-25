@@ -134,6 +134,7 @@ void lcd_init(void) {
     spi_init(SPI_PORT, SPI_BAUDRATE);
     gpio_set_function(LCD_SCK_PIN, GPIO_FUNC_SPI);
     gpio_set_function(LCD_MOSI_PIN, GPIO_FUNC_SPI);
+    gpio_set_function(LCD_MISO_PIN, GPIO_FUNC_SPI);
 
     // Initialize control pins
     gpio_init(LCD_DC_PIN);
@@ -434,25 +435,25 @@ void lcd_draw_bitmap_transparent(uint16_t x, uint16_t y, uint16_t width, uint16_
 
 void lcd_draw_wifi_icon(uint16_t x, uint16_t y, bool connected) {
     uint16_t color = connected ? COLOR_GREEN : COLOR_RED;
-    #include "img/wifi_icon.h"
+    #include "assets/img/wifi_icon.h"
     lcd_draw_bitmap_transparent(x, y, WIFI_ICON_WIDTH, WIFI_ICON_HEIGHT, wifi_icon_data, color);
 }
 
 void lcd_draw_gps_icon(uint16_t x, uint16_t y, bool connected) {
     uint16_t color = connected ? COLOR_GREEN : COLOR_RED;
-    #include "img/gps_icon.h"
+    #include "assets/img/gps_icon.h"
     lcd_draw_bitmap_transparent(x, y, GPS_ICON_WIDTH, GPS_ICON_HEIGHT, gps_icon_data, color);
 }
 
 void lcd_draw_bluetooth_icon(uint16_t x, uint16_t y, bool connected) {
     uint16_t color = connected ? COLOR_GREEN : COLOR_RED;
-    #include "img/bluetooth_icon.h"
+    #include "assets/img/bluetooth_icon.h"
     lcd_draw_bitmap_transparent(x, y, BLUETOOTH_ICON_WIDTH, BLUETOOTH_ICON_HEIGHT, bluetooth_icon_data, color);
 }
 
 void lcd_draw_warning_icon(uint16_t x, uint16_t y, bool active) {
     uint16_t color = active ? COLOR_RED : COLOR_AMBER;
-    #include "img/warning_icon.h"
+    #include "assets/img/warning_icon.h"
     lcd_draw_bitmap_transparent(x, y, WARNING_ICON_WIDTH, WARNING_ICON_HEIGHT, warning_icon_data, color);
 }
 
@@ -506,5 +507,22 @@ void lcd_draw_circle(uint16_t x0, uint16_t y0, uint16_t radius, uint16_t color) 
             x -= 1;
             err -= 2*x + 1;
         }
+    }
+}
+
+void lcd_fill_round_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t r, uint16_t color) {
+    if (r == 0 || r > w/2 || r > h/2) { lcd_fill_rect(x, y, w, h, color); return; }
+    lcd_fill_rect(x,     y + r, w,       h - 2*r, color);  // middle band
+    lcd_fill_rect(x + r, y,     w - 2*r, r,       color);  // top strip
+    lcd_fill_rect(x + r, y + h - r, w - 2*r, r,   color);  // bottom strip
+    int r2 = (int)r * (int)r;
+    for (int dy = 0; dy < (int)r; dy++) {
+        int dist = (int)r - 1 - dy, dx = 0;
+        while ((dx+1)*(dx+1) + dist*dist <= r2) dx++;
+        dx++;
+        lcd_fill_rect(x + r - dx,     y + dy,          dx, 1, color);  // top-left
+        lcd_fill_rect(x + w - r,      y + dy,          dx, 1, color);  // top-right
+        lcd_fill_rect(x + r - dx,     y + h - 1 - dy,  dx, 1, color);  // bot-left
+        lcd_fill_rect(x + w - r,      y + h - 1 - dy,  dx, 1, color);  // bot-right
     }
 }
