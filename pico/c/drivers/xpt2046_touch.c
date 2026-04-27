@@ -84,14 +84,6 @@ bool touch_read(uint16_t *x, uint16_t *y) {
 
     uint16_t z1 = touch_read_channel(CMD_READ_Z1);
 
-    // Debug: print z1 every 500 ms so we can see if XPT2046 responds
-    static uint32_t _last_dbg = 0;
-    uint32_t _now = to_ms_since_boot(get_absolute_time());
-    if (_now - _last_dbg >= 500) {
-        printf("z1=%d\n", z1);
-        _last_dbg = _now;
-    }
-
     if (z1 < Z_THRESHOLD) {
         touch_spi_end();
         lift_count = 0;

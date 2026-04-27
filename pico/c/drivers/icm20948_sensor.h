@@ -1,7 +1,7 @@
 /**
  * ICM20948 9-Axis Motion Sensor Driver
  * Supports: Gyroscope, Accelerometer, Magnetometer
- * Interface: SPI
+ * Interface: SPI0
  */
 
 #ifndef ICM20948_SENSOR_H
@@ -10,8 +10,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Pin definitions for SPI connection
-#define ICM20948_CS_PIN   17
+// SPI0 pin definitions  (NCS=21, SCL=18, SDA=19, ADO=20)
+#define ICM20948_CS_PIN   21
 #define ICM20948_SCK_PIN  18
 #define ICM20948_MOSI_PIN 19
 #define ICM20948_MISO_PIN 20

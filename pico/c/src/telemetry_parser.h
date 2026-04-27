@@ -21,7 +21,9 @@ typedef struct {
     char id[8];
     double lat;
     double lon;
-    double alt;
+    double alt;      // feet
+    double heading;  // degrees (true track)
+    double speed;    // knots
 } TrafficData;
 
 // Structure for connectivity status

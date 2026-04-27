@@ -15,6 +15,9 @@ pico_sdk_init()
 # Include directories
 include_directories(src drivers . assets)
 
+# mbedtls config lives at project root
+set(MBEDTLS_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/mbedtls_config.h" CACHE STRING "")
+
 # Input test executable
 add_executable(input_test
     src/main_input_test.c
@@ -34,16 +37,16 @@ pico_enable_stdio_usb(input_test 1)
 pico_enable_stdio_uart(input_test 0)
 pico_add_extra_outputs(input_test)
 
-# Menu system executable
+# Menu system executable (Pico 2W with WiFi, standalone)
 add_executable(menu_system
     src/main_menu.c
-    src/input_handler.c
     src/menu.c
-    src/telemetry_parser.c
     drivers/st7789_lcd.c
     drivers/icm20948_sensor.c
     drivers/madgwick_filter.c
     drivers/xpt2046_touch.c
+    drivers/wifi_manager.c
+    drivers/opensky_client.c
 )
 
 target_link_libraries(menu_system
@@ -52,12 +55,34 @@ target_link_libraries(menu_system
     hardware_spi
     hardware_adc
     hardware_dma
-    m  # Math library for cos, sin, etc.
+    pico_cyw43_arch_lwip_poll
+    pico_lwip_mbedtls
+    pico_mbedtls
+    m
 )
+
+# lwipopts.h and mbedtls_config.h live at the project root
+target_include_directories(menu_system PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 pico_enable_stdio_usb(menu_system 1)
 pico_enable_stdio_uart(menu_system 0)
 pico_add_extra_outputs(menu_system)
+
+# ICM20948 SPI test
+add_executable(icm_test
+    src/main_icm_test.c
+    drivers/icm20948_sensor.c
+)
+
+target_link_libraries(icm_test
+    pico_stdlib
+    hardware_gpio
+    hardware_spi
+)
+
+pico_enable_stdio_usb(icm_test 1)
+pico_enable_stdio_uart(icm_test 0)
+pico_add_extra_outputs(icm_test)
 
 # Touch screen test executable
 add_executable(touch_test
