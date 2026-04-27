@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "pico/stdlib.h"
+#include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "st7789_lcd.h"
 #include "img/splash_data.h"
@@ -464,9 +465,10 @@ void action_test_gyro(void) {
 
     MadgwickFilter filter;
     madgwick_init(&filter, 100.0f, 0.05f);
+
     SensorData accel, gyro;
 
-    // 1-second bias calibration
+    // 100-sample bias calibration (~1s)
     float gyro_bias_x = 0, gyro_bias_y = 0, gyro_bias_z = 0;
     float accel_bias_x = 0, accel_bias_y = 0, accel_bias_z = 0;
     const int CAL_N = 100;
@@ -485,12 +487,24 @@ void action_test_gyro(void) {
     }
     gyro_bias_x  /= CAL_N; gyro_bias_y  /= CAL_N; gyro_bias_z  /= CAL_N;
     accel_bias_x /= CAL_N; accel_bias_y /= CAL_N; accel_bias_z /= CAL_N;
-    accel_bias_z -= 1.0f;
+    accel_bias_z -= 1.0f;  // keep gravity in Z
 
-    const int16_t center_x = 160, center_y = 120;
+    // Seed quaternion from accel so filter starts at correct attitude immediately
+    {
+        float ax0 = icm20948_accel_to_g(accel.x, ACCEL_RANGE_4G) - accel_bias_x;
+        float ay0 = icm20948_accel_to_g(accel.y, ACCEL_RANGE_4G) - accel_bias_y;
+        float az0 = icm20948_accel_to_g(accel.z, ACCEL_RANGE_4G) - accel_bias_z;
+        float r = atan2f(ay0, az0);
+        float p = atan2f(-ax0, sqrtf(ay0*ay0 + az0*az0));
+        filter.q.q0 =  cosf(r/2)*cosf(p/2);
+        filter.q.q1 =  sinf(r/2)*cosf(p/2);
+        filter.q.q2 =  cosf(r/2)*sinf(p/2);
+        filter.q.q3 = -sinf(r/2)*sinf(p/2);
+    }
+
     absolute_time_t last_update = get_absolute_time();
-    float display_roll = 0.0f, display_pitch = 0.0f;
-    bool display_initialized = false;
+    uint8_t disp_ctr = 0;
+    const int16_t center_x = 160, center_y = 120;
     bool was_touched = false;
 
     while (true) {
@@ -523,6 +537,7 @@ void action_test_gyro(void) {
         float gx_dps = gx_raw - gyro_bias_x;
         float gy_dps = gy_raw - gyro_bias_y;
         float gz_dps = gz_raw - gyro_bias_z;
+
         if (!isfinite(gx_dps) || !isfinite(gy_dps) || !isfinite(gz_dps)) continue;
         if (fabsf(gx_dps) > 2000.0f || fabsf(gy_dps) > 2000.0f || fabsf(gz_dps) > 2000.0f) continue;
 
@@ -532,6 +547,7 @@ void action_test_gyro(void) {
                           fabsf(gx_dps) < 1.2f &&
                           fabsf(gy_dps) < 1.2f &&
                           fabsf(gz_dps) < 1.2f;
+
         if (stationary) {
             float ba = dt * 0.08f; if (ba > 0.02f) ba = 0.02f;
             gyro_bias_x = (1.0f - ba) * gyro_bias_x + ba * gx_raw;
@@ -544,69 +560,63 @@ void action_test_gyro(void) {
         }
         if (fabsf(gz_dps) < 0.15f) gz_dps = 0.0f;
 
-        float gx = gx_dps * M_PI / 180.0f;
-        float gy = gy_dps * M_PI / 180.0f;
-        float gz = gz_dps * M_PI / 180.0f;
+        float gx = gx_dps * (float)M_PI / 180.0f;
+        float gy = gy_dps * (float)M_PI / 180.0f;
+        float gz = gz_dps * (float)M_PI / 180.0f;
 
-        filter.sample_freq    = 1.0f / dt;
+        filter.sample_freq     = 1.0f / dt;
         filter.inv_sample_freq = dt;
         madgwick_update_imu(&filter, gx, gy, gz, ax, ay, az);
 
         float roll  = -madgwick_get_roll_deg(&filter);
         float pitch =  madgwick_get_pitch_deg(&filter);
+
         if (!isfinite(roll) || !isfinite(pitch)) {
             madgwick_init(&filter, 100.0f, 0.05f);
-            display_initialized = false;
             continue;
         }
 
-        if (!display_initialized) {
-            display_roll = roll; display_pitch = pitch;
-            display_initialized = true;
-        } else {
-            float sa = stationary ? 0.08f : 0.25f;
-            display_roll  += sa * (roll  - display_roll);
-            display_pitch += sa * (pitch - display_pitch);
-        }
-        if (fabsf(display_roll)  < 0.35f) display_roll  = 0.0f;
-        if (fabsf(display_pitch) < 0.35f) display_pitch = 0.0f;
-        roll  = display_roll;
-        pitch = display_pitch;
-        if (pitch >  60.0f) pitch =  60.0f;
-        if (pitch < -60.0f) pitch = -60.0f;
+        // Render at ~50 Hz
+        if (++disp_ctr < 2) continue;
+        disp_ctr = 0;
 
-        float roll_rad = roll * M_PI / 180.0f;
-        float cos_r = cosf(roll_rad);
-        float sin_r = sinf(roll_rad);
-        float pitch_px = pitch * 2.0f;
+        float tilt         = roll * (float)M_PI / 180.0f;
+        float sin_tilt     = sinf(tilt);
+        float cos_tilt     = cosf(tilt);
+        float pitch_offset = -pitch * 2.5f;  // pixels per degree, nose-up = sky grows
 
-        for (int16_t y = 0; y < LCD_HEIGHT; y++) {
-            float dy = (float)(y - center_y) + pitch_px;
-            if (fabsf(sin_r) < 0.01f) {
-                lcd_fill_rect(0, y, LCD_WIDTH, 1, (dy < 0) ? COLOR_SKY : COLOR_BROWN);
-            } else {
-                int16_t x_cross = center_x - (int16_t)(dy * cos_r / sin_r);
-                if (x_cross <= 0) {
-                    float test = cos_r * dy + sin_r * (0 - center_x);
-                    lcd_fill_rect(0, y, LCD_WIDTH, 1, (test < 0) ? COLOR_SKY : COLOR_BROWN);
-                } else if (x_cross >= LCD_WIDTH) {
-                    float test = cos_r * dy + sin_r * (0 - center_x);
-                    lcd_fill_rect(0, y, LCD_WIDTH, 1, (test < 0) ? COLOR_SKY : COLOR_BROWN);
-                } else {
-                    float test_left = cos_r * dy + sin_r * (0 - center_x);
-                    uint16_t lc = (test_left < 0) ? COLOR_SKY : COLOR_BROWN;
-                    uint16_t rc = (test_left < 0) ? COLOR_BROWN : COLOR_SKY;
-                    lcd_fill_rect(0,       y, x_cross,             1, lc);
-                    lcd_fill_rect(x_cross, y, LCD_WIDTH - x_cross, 1, rc);
-                }
+        uint16_t *fb = lcd_get_framebuffer();
+        for (int y = 0; y < LCD_HEIGHT; y++) {
+            int dy = y - center_y;
+            for (int x = 0; x < LCD_WIDTH; x++) {
+                int dx = x - center_x;
+                float ry = (float)dx * sin_tilt + (float)dy * cos_tilt - pitch_offset;
+                fb[y * LCD_WIDTH + x] = (ry < 0) ? COLOR_SKY : COLOR_BROWN;
             }
         }
 
-        lcd_draw_line(center_x-35, center_y,   center_x-8,  center_y,   COLOR_YELLOW);
-        lcd_draw_line(center_x+8,  center_y,   center_x+35, center_y,   COLOR_YELLOW);
-        lcd_draw_line(center_x-35, center_y+1, center_x-8,  center_y+1, COLOR_YELLOW);
-        lcd_draw_line(center_x+8,  center_y+1, center_x+35, center_y+1, COLOR_YELLOW);
+        // Horizon line (white, 3px thick)
+        {
+            int hw = 200;
+            int dx = (int)(cos_tilt * hw);
+            int dy = (int)(sin_tilt * hw);
+            int po = (int)pitch_offset;
+            for (int t = -1; t <= 1; t++)
+                lcd_draw_line(center_x - dx, center_y + dy + po + t,
+                              center_x + dx, center_y - dy + po + t, COLOR_WHITE);
+        }
+
+        // Aircraft reference
+        lcd_draw_line(center_x-50, center_y,   center_x-10, center_y,   COLOR_YELLOW);
+        lcd_draw_line(center_x+10, center_y,   center_x+50, center_y,   COLOR_YELLOW);
+        lcd_draw_line(center_x-50, center_y+1, center_x-10, center_y+1, COLOR_YELLOW);
+        lcd_draw_line(center_x+10, center_y+1, center_x+50, center_y+1, COLOR_YELLOW);
         lcd_fill_rect(center_x-3, center_y-3, 7, 7, COLOR_YELLOW);
+
+        // Debug overlay
+        char dbg[32];
+        snprintf(dbg, sizeof(dbg), "R%+6.1f  P%+6.1f", roll, pitch);
+        lcd_draw_string(4, 4, dbg, COLOR_WHITE, COLOR_BLACK);
 
         lcd_flush();
     }
@@ -631,6 +641,7 @@ static MenuItem menu_items[] = {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 int main(void) {
+    set_sys_clock_khz(200000, true);
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
     gpio_put(LED_PIN, 1);
@@ -658,8 +669,7 @@ int main(void) {
     bool was_touched = false;
 
     while (true) {
-        wifi_poll();
-
+        // Touch first — before wifi_poll which can block for tens of ms
         uint16_t tx, ty;
         bool touched = touch_read(&tx, &ty);
         if (touched && !was_touched) {
@@ -667,10 +677,15 @@ int main(void) {
             if (idx >= 0) {
                 icon_menu_flash(idx);
                 menu_items[idx].action();
+                // After returning from action, reset touch state to avoid phantom re-trigger
+                was_touched = true;
                 icon_menu_draw(menu_items, ICON_COUNT);
+                continue;
             }
         }
         was_touched = touched;
+
+        wifi_poll();
 
         // Refresh WiFi icon in ribbon if state changed
         static uint32_t last_ribbon_ms = 0;
@@ -680,7 +695,7 @@ int main(void) {
             last_ribbon_ms = now;
         }
 
-        sleep_ms(10);
+        sleep_ms(5);
     }
 
     return 0;

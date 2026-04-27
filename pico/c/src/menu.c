@@ -100,9 +100,10 @@ void icon_menu_draw(MenuItem* items, int count) {
 }
 
 int icon_menu_hit_test(uint16_t tx, uint16_t ty) {
+    const int PAD = 10;
     for (int i = 0; i < ICON_COUNT; i++) {
-        if (tx >= icon_x[i] && tx < icon_x[i] + ICON_SIZE &&
-            ty >= icon_y[i] && ty < icon_y[i] + ICON_SIZE)
+        if ((int)tx >= (int)icon_x[i] - PAD && (int)tx < (int)icon_x[i] + ICON_SIZE + PAD &&
+            (int)ty >= (int)icon_y[i] - PAD && (int)ty < (int)icon_y[i] + ICON_SIZE + PAD)
             return i;
     }
     return -1;
