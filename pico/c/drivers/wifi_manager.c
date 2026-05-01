@@ -52,12 +52,22 @@ void wifi_poll(void) {
 
     if (!g_started) return;
 
-    // Print status whenever it changes
     int s = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
     if (s != g_last_status) {
         g_last_status = s;
         printf("WiFi: status -> %s (%d)\n", status_str(s), s);
         if (s == CYW43_LINK_UP)
             printf("WiFi: IP=%s\n", ip4addr_ntoa(netif_ip4_addr(netif_default)));
+    }
+
+    // Auto-retry on failure or no-network (e.g. phone hotspot not yet on)
+    if (s == CYW43_LINK_FAIL || s == CYW43_LINK_NONET || s == CYW43_LINK_DOWN) {
+        static uint32_t last_retry_ms = 0;
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+        if (now - last_retry_ms >= 10000) {
+            last_retry_ms = now;
+            printf("WiFi: retrying...\n");
+            cyw43_arch_wifi_connect_async(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_MIXED_PSK);
+        }
     }
 }

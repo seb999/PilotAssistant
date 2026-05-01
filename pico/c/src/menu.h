@@ -5,9 +5,11 @@
 #include <stdbool.h>
 #include "st7789_lcd.h"
 
-#define ICON_COUNT  5
-#define ICON_SIZE   60
-#define ICON_RADIUS 10
+#define ICON_COUNT  3
+#define ICON_SIZE   80
+#define ICON_RADIUS 12
+#define LARGE_BTN_WIDTH  280
+#define LARGE_BTN_HEIGHT 100
 
 typedef struct {
     const char* label;

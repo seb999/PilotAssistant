@@ -69,6 +69,7 @@ void lcd_display_splash(const uint8_t* image_data, size_t data_len);
 void lcd_draw_wifi_icon(uint16_t x, uint16_t y, bool connected);
 void lcd_draw_gps_icon(uint16_t x, uint16_t y, bool connected);
 void lcd_draw_bluetooth_icon(uint16_t x, uint16_t y, bool connected);
+void lcd_draw_battery_icon(uint16_t x, uint16_t y, uint8_t percentage);
 void lcd_draw_warning_icon(uint16_t x, uint16_t y, bool active);
 
 // Draw bitmap with transparency (skips COLOR_WHITE pixels, optionally recolors)
@@ -82,5 +83,8 @@ void lcd_draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t colo
 
 // Draw a filled rounded rectangle
 void lcd_fill_round_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t r, uint16_t color);
+
+// Draw a rounded rectangle outline
+void lcd_draw_round_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t r, uint16_t color);
 
 #endif // ST7789_LCD_H

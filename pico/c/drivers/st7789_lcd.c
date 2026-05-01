@@ -5,6 +5,7 @@
 #include "hardware/dma.h"
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 // SPI instance
 #define SPI_PORT spi1
@@ -416,13 +417,37 @@ void lcd_display_splash(const uint8_t* image_data, size_t data_len) {
     lcd_flush();
 }
 
+void lcd_draw_round_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t r, uint16_t color) {
+    if (r == 0 || r > w/2 || r > h/2) {
+        lcd_draw_line(x,       y,       x+w-1, y,       color);
+        lcd_draw_line(x,       y+h-1,   x+w-1, y+h-1,   color);
+        lcd_draw_line(x,       y,       x,     y+h-1,   color);
+        lcd_draw_line(x+w-1,   y,       x+w-1, y+h-1,   color);
+        return;
+    }
+    lcd_draw_line(x+r,   y,       x+w-1-r, y,       color);
+    lcd_draw_line(x+r,   y+h-1,   x+w-1-r, y+h-1,   color);
+    lcd_draw_line(x,     y+r,     x,       y+h-1-r, color);
+    lcd_draw_line(x+w-1, y+r,     x+w-1,   y+h-1-r, color);
+    int r2 = (int)r * (int)r;
+    for (int dy = 0; dy < (int)r; dy++) {
+        int dist = (int)r - dy;
+        int dx = (int)sqrtf((float)(r2 - dist*dist));
+        uint16_t px;
+        px = x + r - dx; if (px < LCD_WIDTH && (uint16_t)(y+dy) < LCD_HEIGHT) framebuffer[(y+dy)*LCD_WIDTH + px] = color;
+        px = x + w - 1 - r + dx; if (px < LCD_WIDTH && (uint16_t)(y+dy) < LCD_HEIGHT) framebuffer[(y+dy)*LCD_WIDTH + px] = color;
+        px = x + r - dx; if (px < LCD_WIDTH && (uint16_t)(y+h-1-dy) < LCD_HEIGHT) framebuffer[(y+h-1-dy)*LCD_WIDTH + px] = color;
+        px = x + w - 1 - r + dx; if (px < LCD_WIDTH && (uint16_t)(y+h-1-dy) < LCD_HEIGHT) framebuffer[(y+h-1-dy)*LCD_WIDTH + px] = color;
+    }
+}
+
 void lcd_draw_bitmap_transparent(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
                                   const uint16_t* bitmap_data, uint16_t replace_color) {
     for (uint16_t py = 0; py < height; py++) {
         for (uint16_t px = 0; px < width; px++) {
             uint16_t color = bitmap_data[py * width + px];
             if (color == COLOR_WHITE) continue;
-            if (replace_color != COLOR_WHITE) color = replace_color;
+            color = replace_color;
 
             uint16_t dx = x + px;
             uint16_t dy = y + py;
@@ -433,22 +458,37 @@ void lcd_draw_bitmap_transparent(uint16_t x, uint16_t y, uint16_t width, uint16_
     }
 }
 
+
 void lcd_draw_wifi_icon(uint16_t x, uint16_t y, bool connected) {
-    uint16_t color = connected ? COLOR_GREEN : COLOR_RED;
+    uint16_t color = connected ? COLOR_GREEN : COLOR_WHITE;
     #include "assets/img/wifi_icon.h"
     lcd_draw_bitmap_transparent(x, y, WIFI_ICON_WIDTH, WIFI_ICON_HEIGHT, wifi_icon_data, color);
 }
 
 void lcd_draw_gps_icon(uint16_t x, uint16_t y, bool connected) {
-    uint16_t color = connected ? COLOR_GREEN : COLOR_RED;
+    uint16_t color = connected ? COLOR_GREEN : COLOR_WHITE;
     #include "assets/img/gps_icon.h"
     lcd_draw_bitmap_transparent(x, y, GPS_ICON_WIDTH, GPS_ICON_HEIGHT, gps_icon_data, color);
 }
 
 void lcd_draw_bluetooth_icon(uint16_t x, uint16_t y, bool connected) {
-    uint16_t color = connected ? COLOR_GREEN : COLOR_RED;
+    uint16_t color = connected ? COLOR_GREEN : COLOR_WHITE;
     #include "assets/img/bluetooth_icon.h"
     lcd_draw_bitmap_transparent(x, y, BLUETOOTH_ICON_WIDTH, BLUETOOTH_ICON_HEIGHT, bluetooth_icon_data, color);
+}
+
+void lcd_draw_battery_icon(uint16_t x, uint16_t y, uint8_t percentage) {
+    // Color based on battery level: green > 50%, white 20-50%, red < 20%
+    uint16_t color;
+    if (percentage > 50) {
+        color = COLOR_GREEN;
+    } else if (percentage >= 20) {
+        color = COLOR_WHITE;
+    } else {
+        color = COLOR_RED;
+    }
+    #include "assets/img/battery_icon.h"
+    lcd_draw_bitmap_transparent(x, y, BATTERY_ICON_WIDTH, BATTERY_ICON_HEIGHT, battery_icon_data, color);
 }
 
 void lcd_draw_warning_icon(uint16_t x, uint16_t y, bool active) {
