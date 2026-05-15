@@ -26,6 +26,9 @@
 // Traffic data populated by OpenSky fetches
 static TelemetryData latest_telemetry;
 
+// Navigation flag: set by action_radar to signal "ribbon pressed → return to menu"
+static bool g_radar_exit_to_menu = false;
+
 // ── Status ribbon ─────────────────────────────────────────────────────────────
 
 static void draw_ribbon_internal(void) {
@@ -509,7 +512,11 @@ void action_radar(void) {
         bool touched = touch_read(&tx, &ty);
         if (touched && !was_touched) {
             if (ty < 28) {
+                g_radar_exit_to_menu = true;
                 break;  // Tap ribbon → back to menu
+            } else if (tx <= RDR_PX) {
+                g_radar_exit_to_menu = false;
+                break;  // Tap radar area → back to AHRS
             } else if (tx > RDR_PX) {
                 int n = latest_telemetry.traffic_count;
                 if (ty >= RDR_BTN_Y && n > 0) {
@@ -652,12 +659,20 @@ void action_test_gyro(void) {
             break;
         }
 
-        // Check for touch to exit
+        // Check for touch
         uint16_t tx, ty;
         bool touched = touch_read(&tx, &ty);
-        if (touched && !was_touched && ty < 28) {
-            // Tap ribbon to exit
-            break;
+        if (touched && !was_touched) {
+            if (ty < 28) {
+                break;  // Ribbon → back to menu
+            } else {
+                // Any screen touch → go to radar
+                g_radar_exit_to_menu = false;
+                action_radar();
+                if (g_radar_exit_to_menu) break;  // Ribbon pressed in radar → menu
+                // Otherwise continue AHRS loop
+                disp_ctr = 0;
+            }
         }
         was_touched = touched;
 

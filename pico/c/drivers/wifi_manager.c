@@ -60,8 +60,8 @@ void wifi_poll(void) {
             printf("WiFi: IP=%s\n", ip4addr_ntoa(netif_ip4_addr(netif_default)));
     }
 
-    // Auto-retry on failure or no-network (e.g. phone hotspot not yet on)
-    if (s == CYW43_LINK_FAIL || s == CYW43_LINK_NONET || s == CYW43_LINK_DOWN) {
+    // Auto-retry only on explicit failure (not DOWN which is the pre-connect state)
+    if (s == CYW43_LINK_FAIL || s == CYW43_LINK_NONET) {
         static uint32_t last_retry_ms = 0;
         uint32_t now = to_ms_since_boot(get_absolute_time());
         if (now - last_retry_ms >= 10000) {

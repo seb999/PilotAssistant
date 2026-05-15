@@ -140,12 +140,14 @@ static void draw_icon(MenuItem* item, int index) {
 
         lcd_draw_round_rect(ix, iy, btn_w, btn_h, 16, darken_color(item->bg_color));
 
-        // Label centered (no icon)
+        // Icon left, label right, both vertically centered
         const char* lbl = item->label;
         int len = strlen(lbl);
-        int lx = ix + (btn_w - len * 12) / 2;  // Scaled for 2x text
-        int ly = iy + (btn_h - 14) / 2;  // Vertically center (2x font height ~14px)
-        lcd_draw_string_scaled(lx, ly, lbl, COLOR_WHITE, 0, 2);
+        int content_w = 24 + 8 + len * 12;  // icon + gap + 2x text
+        int off = (btn_w - content_w) / 2;
+        if (off < 8) off = 8;
+        lcd_draw_plane_icon(ix + off, iy + (btn_h - 24) / 2, COLOR_WHITE);
+        lcd_draw_string_scaled(ix + off + 24 + 8, iy + (btn_h - 14) / 2, lbl, COLOR_WHITE, 0, 2);
     } else {
         // Smaller buttons for BLUETOOTH and RADAR with gradient
         uint16_t btn_w = 120;
@@ -182,12 +184,15 @@ static void draw_icon(MenuItem* item, int index) {
 
         const char* lbl = item->label;
         int len = strlen(lbl);
-        if (index == 1) {
-            // Bluetooth: icon left, label right, both vertically centered
+        if (index == 1 || index == 2) {
+            // Icon left, label right, both vertically centered
             int content_w = 24 + 6 + len * 6;
             int off = (btn_w - content_w) / 2;
             if (off < 4) off = 4;
-            lcd_draw_bluetooth_icon(ix + off, iy + (btn_h - 24) / 2, false);
+            if (index == 1)
+                lcd_draw_bluetooth_icon(ix + off, iy + (btn_h - 24) / 2, false);
+            else
+                lcd_draw_settings_icon(ix + off, iy + (btn_h - 24) / 2, COLOR_WHITE);
             lcd_draw_string(ix + off + 24 + 6, iy + (btn_h - 7) / 2, lbl, COLOR_WHITE, 0);
         } else {
             int lx = ix + (btn_w - len * 6) / 2;

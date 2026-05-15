@@ -386,21 +386,35 @@ void lcd_flush_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
 
     lcd_set_window(x, y, x + w, y + h);
 
-    gpio_put(LCD_DC_PIN, 1);  // Data mode
-    gpio_put(LCD_CS_PIN, 0);  // Select LCD
+    gpio_put(LCD_DC_PIN, 1);
+    gpio_put(LCD_CS_PIN, 0);
 
-    // Send row by row from framebuffer
-    for (uint16_t row = y; row < y + h; row++) {
-        // Byte-swap the row segment
-        uint16_t* row_start = &framebuffer[row * LCD_WIDTH + x];
-        for (uint16_t i = 0; i < w; i++) {
-            uint16_t val = row_start[i];
-            uint8_t swapped[2] = {val >> 8, val & 0xFF};
-            spi_write_blocking(SPI_PORT, swapped, 2);
+    if (x == 0 && w == LCD_WIDTH) {
+        // Full-width rows are contiguous in framebuffer — use DMA
+        uint16_t* start = &framebuffer[y * LCD_WIDTH];
+        uint32_t count = (uint32_t)w * h;
+        swap_bytes_region((uint8_t*)start, count);
+        dma_channel_config c = dma_channel_get_default_config(dma_chan);
+        channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
+        channel_config_set_dreq(&c, spi_get_dreq(SPI_PORT, true));
+        channel_config_set_read_increment(&c, true);
+        channel_config_set_write_increment(&c, false);
+        dma_channel_configure(dma_chan, &c, &spi_get_hw(SPI_PORT)->dr, start, count * 2, true);
+        dma_channel_wait_for_finish_blocking(dma_chan);
+        while (spi_is_busy(SPI_PORT)) tight_loop_contents();
+        swap_bytes_region((uint8_t*)start, count);
+    } else {
+        for (uint16_t row = y; row < y + h; row++) {
+            uint16_t* row_start = &framebuffer[row * LCD_WIDTH + x];
+            for (uint16_t i = 0; i < w; i++) {
+                uint16_t val = row_start[i];
+                uint8_t swapped[2] = {val >> 8, val & 0xFF};
+                spi_write_blocking(SPI_PORT, swapped, 2);
+            }
         }
     }
 
-    gpio_put(LCD_CS_PIN, 1);  // Deselect
+    gpio_put(LCD_CS_PIN, 1);
 }
 
 void lcd_display_splash(const uint8_t* image_data, size_t data_len) {
@@ -458,6 +472,16 @@ void lcd_draw_bitmap_transparent(uint16_t x, uint16_t y, uint16_t width, uint16_
     }
 }
 
+
+void lcd_draw_plane_icon(uint16_t x, uint16_t y, uint16_t color) {
+    #include "assets/img/plane_icon.h"
+    lcd_draw_bitmap_transparent(x, y, AIRCRAFT_ICON_WIDTH, AIRCRAFT_ICON_HEIGHT, aircraft_icon_data, color);
+}
+
+void lcd_draw_settings_icon(uint16_t x, uint16_t y, uint16_t color) {
+    #include "assets/img/setting_icon.h"
+    lcd_draw_bitmap_transparent(x, y, SETTINGS_ICON_WIDTH, SETTINGS_ICON_HEIGHT, settings_icon_data, color);
+}
 
 void lcd_draw_wifi_icon(uint16_t x, uint16_t y, bool connected) {
     uint16_t color = connected ? COLOR_GREEN : COLOR_WHITE;

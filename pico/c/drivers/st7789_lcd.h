@@ -87,4 +87,7 @@ void lcd_fill_round_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_
 // Draw a rounded rectangle outline
 void lcd_draw_round_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t r, uint16_t color);
 
+void lcd_draw_settings_icon(uint16_t x, uint16_t y, uint16_t color);
+void lcd_draw_plane_icon(uint16_t x, uint16_t y, uint16_t color);
+
 #endif // ST7789_LCD_H
